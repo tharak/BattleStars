@@ -25,11 +25,11 @@ const toRings = hexRadius => hexRadius + 1;
 const MIN_BOARD_RINGS = 13;
 
 // Relative body sizes, in hex-blob radius (0 = a single hex). Not to
-// scale -- just per spec: Mars/Mercury radius 0, Earth/Venus radius 3,
-// Uranus/Neptune radius 2, Jupiter/Saturn radius 3, Sun radius 4.
+// scale -- just per spec: Mars/Mercury radius 0, Earth/Venus radius 2,
+// Uranus/Neptune radius 1, Jupiter/Saturn radius 2, Sun radius 3.
 export const SIZE = {
-  sun: 4, mercury: 0, venus: 3, earth: 3, mars: 0, belt: 0,
-  jupiter: 3, saturn: 3, uranus: 2, neptune: 2,
+  sun: 3, mercury: 0, venus: 2, earth: 2, mars: 0, belt: 0,
+  jupiter: 2, saturn: 2, uranus: 1, neptune: 1,
 };
 
 // A radial board is a hexagon (same inBounds hex-radius mask idea as the
