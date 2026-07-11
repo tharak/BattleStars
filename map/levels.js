@@ -156,13 +156,20 @@ export const FLEET_FORMATIONS = { blue: "line", green: "line", red: "line" };
 // already designed not to self-overlap. Radius 9 comfortably fits every
 // formation's fwd (-4..4) / lat (-6..5) range.
 const FORMATION_BOARD_RINGS = toRings(9);
+// Same facing convention deployFormation (battle/formations.js) uses for
+// side 0: df===0 faces straight ahead, df>0/df<0 angle toward the flank.
+// There's no real "attacker" here (just one fleet previewed on its own),
+// so this is an arbitrary but fixed orientation, not tied to any faction.
+const FACING = { straight: 0, toPos: 5, toNeg: 1 };
 export function formationBoard(faction, formationName) {
   const { u, flag } = formationLayout(formationName, SHIPS_PER_FACTION);
   const hexRadius = rings(FORMATION_BOARD_RINGS);
   const center = [hexRadius, hexRadius];
-  const cells = u.map(([fwd, lat], i) => ({
+  const cells = u.map(([fwd, lat, df], i) => ({
     id: `ship${i}`, label: i === flag ? "★" : String(i + 1),
-    kind: "ownship", faction, pos: [center[0] + fwd, center[1] + lat],
+    kind: "ownship", faction, isFlag: i === flag,
+    facing: df === 0 ? FACING.straight : (df > 0 ? FACING.toPos : FACING.toNeg),
+    pos: [center[0] + fwd, center[1] + lat],
   }));
   return {
     cols: hexRadius * 2 + 1, rows: hexRadius * 2 + 1, center, radius: FORMATION_BOARD_RINGS,

@@ -1,6 +1,6 @@
 import { makeHexGrid } from "./hexgrid.js";
 import { UNIVERSE, SYSTEMS, celestialBodyLevel, formationBoard, FLEET_FORMATIONS, FORMATION_NAMES } from "./levels.js";
-import { hexDist } from "../battle/hexmath.js";
+import { hexDist, DIR_ANGLE } from "../battle/hexmath.js";
 
 const canvas = document.getElementById("cv");
 const breadcrumb = document.getElementById("breadcrumb");
@@ -166,17 +166,34 @@ function render() {
     grid.ctx.strokeStyle = cell ? colorsFor(cell).stroke : "#2a3350";
     grid.ctx.lineWidth = cell ? 2 : 1;
     grid.ctx.stroke();
+    // Ship tokens get a facing arrow, same triangle battle/render.js draws
+    // for a unit's facing -- this is what actually reads as "a ship" rather
+    // than a plain numbered hex.
+    if (cell?.kind === "ownship") {
+      const a = DIR_ANGLE[cell.facing] * Math.PI / 180;
+      grid.ctx.beginPath();
+      grid.ctx.moveTo(x + Math.cos(a) * (grid.hs - 4), y + Math.sin(a) * (grid.hs - 4));
+      grid.ctx.lineTo(x + Math.cos(a + 2.6) * (grid.hs - 11), y + Math.sin(a + 2.6) * (grid.hs - 11));
+      grid.ctx.lineTo(x + Math.cos(a - 2.6) * (grid.hs - 11), y + Math.sin(a - 2.6) * (grid.hs - 11));
+      grid.ctx.closePath();
+      grid.ctx.fillStyle = cell.isFlag ? "#ffd166" : "#d7deef";
+      grid.ctx.fill();
+    }
   }
   for (const cell of data.cells) {
     const subBoard = subBoardFor(cell.enter);
     if (subBoard) drawSubBoardPreview(grid, cell, subBoard);
     const [x, y] = grid.hexCenter(cell.pos[0], cell.pos[1]);
-    grid.ctx.fillStyle = "#d7deef";
     grid.ctx.font = "bold 11px system-ui";
     grid.ctx.textAlign = "center";
     // A cell with a preview has its center busy with the mini graphic --
     // put its label below instead of overlapping it.
-    grid.ctx.fillText(cell.label, x, subBoard ? y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13 : y + 4);
+    const ly = subBoard ? y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13 : y + 4;
+    // A ship's number/flagship star sits right on top of its facing arrow
+    // (light fill), so it needs dark text there instead of the usual light
+    // label color to stay legible.
+    grid.ctx.fillStyle = cell.kind === "ownship" ? "#0b0e14" : "#d7deef";
+    grid.ctx.fillText(cell.label, x, ly);
   }
 
   canvas.onclick = ev => {
