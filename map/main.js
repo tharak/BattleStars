@@ -39,8 +39,35 @@ const PLANET_COLORS = {
   uranus:  { fill: "#1a4a4a", stroke: "#7de8e8" },
   neptune: { fill: "#1a2a5c", stroke: "#5a7dff" },
 };
+
+// Same idea, per moon (id = its name lowercased -- see celestialBodyLevel
+// in levels.js). Most moons don't have a strongly "iconic" real color the
+// way planets do, so these are mainly picked to stay distinguishable from
+// each other and from their parent planet's own color, with a nod to the
+// few that do have a real look (sulfurous Io, hazy orange Titan, etc).
+const MOON_COLORS = {
+  moon:     { fill: "#4a4a4a", stroke: "#c8c8c8" },
+  phobos:   { fill: "#4a3a2a", stroke: "#c9a678" },
+  deimos:   { fill: "#3a2e28", stroke: "#a68968" },
+  io:       { fill: "#5c4010", stroke: "#f0c040" },
+  europa:   { fill: "#4a4838", stroke: "#e8dcc0" },
+  ganymede: { fill: "#3a3428", stroke: "#a89878" },
+  callisto: { fill: "#2e2a24", stroke: "#8a7d68" },
+  titan:    { fill: "#5c4520", stroke: "#e8b060" },
+  rhea:     { fill: "#404040", stroke: "#d8d8d8" },
+  iapetus:  { fill: "#3a3a3a", stroke: "#b8b0a0" },
+  dione:    { fill: "#3e3e3e", stroke: "#c8c8d0" },
+  tethys:   { fill: "#383838", stroke: "#c0c8c8" },
+  titania:  { fill: "#2e3a3a", stroke: "#88b8b8" },
+  oberon:   { fill: "#2a3438", stroke: "#7898a0" },
+  miranda:  { fill: "#343030", stroke: "#a89898" },
+  ariel:    { fill: "#303838", stroke: "#90a8a8" },
+  umbriel:  { fill: "#242424", stroke: "#686868" },
+  triton:   { fill: "#2a3050", stroke: "#8098d8" },
+};
+
 function colorsFor(cell) {
-  const p = PLANET_COLORS[cell.id];
+  const p = PLANET_COLORS[cell.id] || MOON_COLORS[cell.id];
   return p || { fill: FILL[cell.kind] || "#1a2133", stroke: STROKE[cell.kind] || "#2a3350" };
 }
 
