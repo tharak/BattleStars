@@ -14,14 +14,28 @@ export function makeHexGrid(canvas, { cols, rows, hs, ox = 40, oy = 40, inBounds
   canvas.width = ox * 2 + hw * (cols + 0.5);
   canvas.height = oy * 2 + hs * 1.5 * (rows - 1) + hs * 2;
 
+  function corner(x, y, s, k) {
+    const a = (60 * k - 90) * Math.PI / 180;
+    return [x + s * Math.cos(a), y + s * Math.sin(a)];
+  }
+
   function hexPath(x, y, s) {
     ctx.beginPath();
     for (let k = 0; k < 6; k++) {
-      const a = (60 * k - 90) * Math.PI / 180;
-      const px = x + s * Math.cos(a), py = y + s * Math.sin(a);
+      const [px, py] = corner(x, y, s, k);
       k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
     }
     ctx.closePath();
+  }
+
+  // Just one edge (corner k -> corner k+1), for outlining a multi-hex blob
+  // without drawing the internal grid lines between same-owner hexes.
+  function edgePath(x, y, s, k) {
+    const [x1, y1] = corner(x, y, s, k);
+    const [x2, y2] = corner(x, y, s, (k + 1) % 6);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
   }
 
   function pixelToHex(x, y) {
@@ -34,5 +48,5 @@ export function makeHexGrid(canvas, { cols, rows, hs, ox = 40, oy = 40, inBounds
     return bd <= (hs * 1.05) ** 2 ? best : null;
   }
 
-  return { ctx, hs, hexCenter, hexPath, pixelToHex, cols, rows, inBounds };
+  return { ctx, hs, hexCenter, hexPath, edgePath, pixelToHex, cols, rows, inBounds };
 }
