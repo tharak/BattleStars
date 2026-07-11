@@ -61,7 +61,7 @@ function render() {
     grid.ctx.fillStyle = "#d7deef";
     grid.ctx.font = "bold 11px system-ui";
     grid.ctx.textAlign = "center";
-    grid.ctx.fillText(cell.label, x, y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13);
+    grid.ctx.fillText(cell.label, x, y + 4);
   }
 
   canvas.onclick = ev => {
