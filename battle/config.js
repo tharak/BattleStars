@@ -1,7 +1,22 @@
-// Board/rule constants and scenario data (mirror battle_sim.py
-// exactly). Pure data -- no ECS or DOM coupling.
+// Board/rule constants and scenario data (rule numbers mirror battle_sim.py;
+// the board shape below is web-only -- the Python Monte-Carlo sim still
+// plays on its own rectangular grid, so its cited win rates are unaffected).
+import { hexDist } from "./hexmath.js";
 
-export const COLS = 24, ROWS = 18, RANGE = 3, CMD_R = 4, MP_MAX = 3, MAX_TURNS = 15;
+export const RANGE = 3, CMD_R = 4, MP_MAX = 3, MAX_TURNS = 15;
+
+// The playable board is a hexagon (pointy left/right, flat top/bottom):
+// all hexes within BOARD_RADIUS of BOARD_CENTER. COLS/ROWS are just the
+// bounding box the hexagon is inscribed in -- use inBounds(), not a
+// rectangle check, to test whether a hex is actually on the board.
+export const COLS = 27, ROWS = 27;
+export const BOARD_CENTER = [13, 13], BOARD_RADIUS = 13;
+export const inBounds = (c, r) => hexDist(BOARD_CENTER, [c, r]) <= BOARD_RADIUS;
+
+// Anchor columns formationLayout() offsets ("fwd") deploy around, and the
+// row ("lat" offsets) they're centered on -- chosen so every existing
+// formation at every fleet size stays inside the hexagon on both sides.
+export const DEPLOY_ANCHOR = [7, 19], DEPLOY_ROW_CENTER = 13;
 
 export const MoraleState = Object.freeze({ STEADY: 0, SHAKEN: 1, ROUTED: 2 });
 export const STATE_NAME = ["Steady", "Shaken", "ROUTED"];
@@ -15,10 +30,10 @@ export const FORMATION_NAMES = ["line", "spindle", "crescent", "echelon", "spher
 
 // Deployment zones: each side may only place squadrons in its own half,
 // leaving a neutral no-man's-land in the middle columns.
-export const SETUP_ZONE = [[0, 8], [15, COLS - 1]];
+export const SETUP_ZONE = [[0, 9], [17, COLS - 1]];
 
 // Hex pixel geometry (canvas rendering).
-export const HS = 19;                    // hex size (center -> corner)
+export const HS = 17;                    // hex size (center -> corner)
 export const HW = HS * Math.sqrt(3);     // hex width
 export const OX = 26, OY = 26;
 

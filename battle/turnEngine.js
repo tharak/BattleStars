@@ -1,7 +1,7 @@
 // Battle lifecycle/orchestration: whose turn is it, activation flow, human
 // command handlers, and win/draw detection. Delegates actual rule
 // resolution to systems.js and reads via queries.js.
-import { COLS, ROWS, MP_MAX, MAX_TURNS, MoraleState, sideName } from "./config.js";
+import { MP_MAX, MAX_TURNS, MoraleState, sideName, inBounds } from "./config.js";
 import { neighbor, hexDist, key } from "./hexmath.js";
 import { deployFormation } from "./formations.js";
 import { fire, aiActivate, routedActivation } from "./systems.js";
@@ -157,7 +157,7 @@ export function doForward(state) {
   if (!Q.canMove(state)) return;
   const e = state.act.u, pos = Q.posOf(state, e), facing = Q.facingOf(state, e);
   const nx = neighbor(pos, facing);
-  if (nx[0] < 0 || nx[0] >= COLS || nx[1] < 0 || nx[1] >= ROWS) return;
+  if (!inBounds(nx[0], nx[1])) return;
   if (Q.occupiedSet(state).has(key(nx[0], nx[1]))) return;
   if (Q.moraleOf(state, e) === SHAKEN) { // may not end closer to nearest enemy
     const ne = Q.nearestEnemy(state, e);
@@ -173,7 +173,7 @@ export function doBackward(state) {
   if (!Q.canBack(state)) return;
   const e = state.act.u, pos = Q.posOf(state, e), facing = Q.facingOf(state, e);
   const nx = neighbor(pos, (facing + 3) % 6);
-  if (nx[0] < 0 || nx[0] >= COLS || nx[1] < 0 || nx[1] >= ROWS) return;
+  if (!inBounds(nx[0], nx[1])) return;
   if (Q.occupiedSet(state).has(key(nx[0], nx[1]))) return;
   if (Q.moraleOf(state, e) === SHAKEN) { // may not end a move closer to nearest enemy
     const ne = Q.nearestEnemy(state, e);

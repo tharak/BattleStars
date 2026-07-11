@@ -1,6 +1,6 @@
 // Canvas rendering. Reads component data via queries.js and colors via
 // colors.js -- never mutates game state.
-import { COLS, ROWS, RANGE, CMD_R, HS, HW, OX, OY, MoraleState } from "./config.js";
+import { COLS, ROWS, RANGE, CMD_R, HS, HW, OX, OY, MoraleState, inBounds } from "./config.js";
 import { DIR_ANGLE, hexDist, losClear, inFireArc, key } from "./hexmath.js";
 import { inSetupZone } from "./formations.js";
 import { SIDE_COLORS, STATE_COLORS, ACCENT, BOARD_TINT } from "./colors.js";
@@ -15,6 +15,7 @@ export function hexCenter(c, r) { return [OX + (c + 0.5 * (r & 1)) * HW, OY + r 
 export function pixelToHex(x, y) {
   let best = null, bd = 1e9;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (!inBounds(c, r)) continue;
     const [hx, hy] = hexCenter(c, r), d = (hx - x) ** 2 + (hy - y) ** 2;
     if (d < bd) { bd = d; best = [c, r]; }
   }
@@ -65,12 +66,13 @@ function renderFrame(state) {
     const pos = Q.posOf(state, act.u), facing = Q.facingOf(state, act.u);
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const p = [c, r];
-      if (hexDist(pos, p) <= RANGE && hexDist(pos, p) > 0
+      if (inBounds(c, r) && hexDist(pos, p) <= RANGE && hexDist(pos, p) > 0
           && inFireArc(facing, pos, p) && losClear(pos, p, occ)) zone.add(key(c, r));
     }
   }
   // grid
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (!inBounds(c, r)) continue;
     const [x, y] = hexCenter(c, r);
     hexPath(x, y, HS - 0.6);
     cx2.fillStyle = zone.has(key(c, r)) ? BOARD_TINT.fireZone : BOARD_TINT.gridCell;
@@ -85,7 +87,7 @@ function renderFrame(state) {
   const setup = state.setup;
   if (setup) {
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      if (!inSetupZone(setup.side, c)) continue;
+      if (!inBounds(c, r) || !inSetupZone(setup.side, c)) continue;
       const [x, y] = hexCenter(c, r);
       hexPath(x, y, HS - 0.6);
       cx2.fillStyle = BOARD_TINT.setupZone(setup.side);
@@ -121,7 +123,7 @@ function renderFrame(state) {
     const flPos = Q.posOf(state, fl);
     const tint = BOARD_TINT.commandReach(s);
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      if (hexDist(flPos, [c, r]) > CMD_R) continue;
+      if (!inBounds(c, r) || hexDist(flPos, [c, r]) > CMD_R) continue;
       const [x, y] = hexCenter(c, r);
       hexPath(x, y, HS - 0.6);
       cx2.fillStyle = tint; cx2.fill();

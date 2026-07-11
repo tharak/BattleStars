@@ -4,7 +4,7 @@
 // rendering and activation bookkeeping after invoking a system.
 import { log } from "./panels.js";
 import { hexDist, neighbor, angleBetween, argmin, range, DIR_ANGLE, key, incomingArc } from "./hexmath.js";
-import { COLS, ROWS, RANGE, MP_MAX, HOLD_FORMS, MoraleState, sideName, sideCls } from "./config.js";
+import { RANGE, MP_MAX, HOLD_FORMS, MoraleState, sideName, sideCls, inBounds } from "./config.js";
 import { LASER_DURATION } from "./dimensions.js";
 import * as C from "./components.js";
 import * as Q from "./queries.js";
@@ -94,7 +94,7 @@ export function aiStep(state, e) { // one MP toward nearest enemy; false if unus
   const d = desiredDir(pos, nePos);
   if (Q.facingOf(state, e) !== d) { turnToward(state, e, d); return true; }
   const nx = neighbor(pos, d);
-  if (nx[0] >= 0 && nx[0] < COLS && nx[1] >= 0 && nx[1] < ROWS
+  if (inBounds(nx[0], nx[1])
       && !Q.occupiedSet(state).has(key(nx[0], nx[1]))
       && hexDist(nx, nePos) < hexDist(pos, nePos)) { setPos(state, e, nx); return true; }
   return false;
@@ -105,7 +105,7 @@ export function flee(state, e) {
   for (let i = 0; i < MP_MAX; i++) {
     if (Q.facingOf(state, e) !== d) { turnToward(state, e, d); continue; }
     const nx = neighbor(Q.posOf(state, e), d);
-    if (nx[0] < 0 || nx[0] >= COLS || nx[1] < 0 || nx[1] >= ROWS) {
+    if (!inBounds(nx[0], nx[1])) {
       state.world.remove(e, C.Alive);
       log(`  ${Q.labelOf(state, e)} flees off the map`, "bad");
       return;
