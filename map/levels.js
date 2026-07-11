@@ -25,10 +25,11 @@ const toRings = hexRadius => hexRadius + 1;
 const MIN_BOARD_RINGS = 13;
 
 // Relative body sizes, in hex-blob radius (0 = a single hex). Not to
-// scale -- just per spec: Mars/Mercury radius 0, Earth/Venus radius 2,
-// Uranus/Neptune radius 1, Jupiter/Saturn radius 2, Sun radius 3.
+// scale -- just per spec: Mars/Mercury radius 1 (a bare single hex read as
+// "missing" next to the bigger planets), Earth/Venus radius 2,
+// Uranus/Neptune radius 1, Jupiter/Saturn radius 2, Sun radius 2.
 export const SIZE = {
-  sun: 3, mercury: 0, venus: 2, earth: 2, mars: 0, belt: 0,
+  sun: 2, mercury: 1, venus: 2, earth: 2, mars: 1, belt: 0,
   jupiter: 2, saturn: 2, uranus: 1, neptune: 1,
 };
 
@@ -84,7 +85,7 @@ export const SYSTEMS = {
         { id: "saturn",  label: "Saturn",  kind: "planet", size: SIZE.saturn,  enter: { level: "body", systemId: "sol", bodyId: "saturn" } },
         { id: "uranus",  label: "Uranus",  kind: "planet", size: SIZE.uranus,  enter: { level: "body", systemId: "sol", bodyId: "uranus" } },
         { id: "neptune", label: "Neptune", kind: "planet", size: SIZE.neptune, enter: { level: "body", systemId: "sol", bodyId: "neptune" } },
-      ]);
+      ], 3);
       return { ...board, hs: hsForRadius(board.radius) };
     })(),
   },
