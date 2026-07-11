@@ -11,14 +11,18 @@ import { neighbor } from "../battle/hexmath.js";
 // radius 1 = just the center hex, radius 2 = center + one ring = 7 hexes,
 // radius 13 = center + 12 rings = 469 hexes. hexDist() (and every other
 // hex-math helper here) instead counts rings *around* the center, so the
-// conversion is always ringRadius - 1.
+// conversion is always ringRadius - 1. Every board's exposed `radius` field
+// (and cell `size`s that describe a board, not a body -- see below) uses
+// this ring convention throughout; only radialBoard's internals convert to
+// hexDist for the actual hex math (masking, walking).
 const rings = n => n - 1;
+const toRings = hexRadius => hexRadius + 1;
 
 // Every map -- Universe, System, or CelestialBody -- is at least this big,
 // regardless of how little it has in it (a moonless body still gets a full
 // board, just mostly empty space around it). A board only grows past this
 // if its own content doesn't fit -- see radialBoard().
-const MIN_BOARD_RADIUS = rings(13);
+const MIN_BOARD_RINGS = 13;
 
 // Relative body sizes, in hex-blob radius (0 = a single hex). Not to
 // scale -- just per spec: Mars/Mercury radius 0, Earth/Venus radius 3,
@@ -34,8 +38,8 @@ export const SIZE = {
 // walks straight out in one of 6 directions (round-robin, via hexmath's
 // neighbor()) far enough that its own hex-blob (cell.size, a hexDist<=size
 // disc, not just a single hex) never touches the previous blob on the same
-// ray, the center's blob, or its own gap. Board radius is whichever is
-// bigger: MIN_BOARD_RADIUS, or wherever that packing ends up.
+// ray, the center's blob, or its own gap. Board radius (in rings) is
+// whichever is bigger: MIN_BOARD_RINGS, or wherever that packing ends up.
 function radialBoard(centerCell, items, gap = 1) {
   const centerRadius = centerCell.size || 0;
   const frontier = {}; // dir -> outer edge (hex distance from center) claimed so far
@@ -45,15 +49,15 @@ function radialBoard(centerCell, items, gap = 1) {
     frontier[dir] = dist + r;
     return { item, dir, dist };
   });
-  const radius = Math.max(centerRadius, MIN_BOARD_RADIUS, ...Object.values(frontier), 0);
-  const center = [radius, radius];
+  const hexRadius = Math.max(centerRadius, rings(MIN_BOARD_RINGS), ...Object.values(frontier), 0);
+  const center = [hexRadius, hexRadius];
   const walk = (dir, steps) => { let p = center; for (let i = 0; i < steps; i++) p = neighbor(p, dir); return p; };
   const cells = [{ ...centerCell, pos: center }];
   for (const { item, dir, dist } of placements) cells.push({ ...item, pos: walk(dir, dist) });
-  return { cols: radius * 2 + 1, rows: radius * 2 + 1, center, radius, cells };
+  return { cols: hexRadius * 2 + 1, rows: hexRadius * 2 + 1, center, radius: toRings(hexRadius), cells };
 }
 
-const hsForRadius = radius => Math.max(16, Math.round(216 / radius));
+const hsForRadius = ringRadius => Math.max(16, Math.round(216 / rings(ringRadius)));
 
 // The universe is otherwise-empty space with Sol as its one system so far,
 // drawn at ring-radius 2 (7 hexes: the center plus one ring) -- reuse

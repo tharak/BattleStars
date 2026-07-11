@@ -42,8 +42,10 @@ function drawSubHexes(grid, x, y, strokeColor) {
 function render() {
   const entry = path[path.length - 1];
   const data = levelData(entry);
+  // data.radius counts rings including the center (see map/levels.js), one
+  // more than the hexDist value the mask actually needs.
   const inBounds = data.center && data.radius != null
-    ? (c, r) => hexDist(data.center, [c, r]) <= data.radius
+    ? (c, r) => hexDist(data.center, [c, r]) <= data.radius - 1
     : undefined;
   const grid = makeHexGrid(canvas, { cols: data.cols, rows: data.rows, hs: data.hs, ...(inBounds && { inBounds }) });
   // A cell can be a multi-hex blob (cell.size = hexDist radius, not just a
