@@ -180,17 +180,13 @@ function render() {
     if (!h) return;
     const hits = cellsAt(h[0], h[1]);
     if (!hits.length) { setHint("Empty space — nothing here."); return; }
-    // Two different factions' fleets sharing a hex is a battle -- there's
-    // no "Enter Battle" hex anymore, this is the only way in.
-    const factions = new Set(hits.filter(c => c.kind === "fleet").map(c => c.faction));
-    if (factions.size > 1) { window.location.href = "battle.html"; return; }
+    // Zooming a fleet always opens the Battle map -- alone, that's where
+    // you set its formation; sharing the hex with another faction's fleet,
+    // it's a battle. There's no "Enter Battle" hex anymore, this is the
+    // only way in.
+    if (hits.some(c => c.kind === "fleet")) { window.location.href = "battle.html"; return; }
     const cell = hits[0];
     if (cell.enter) { zoomIn(cell.enter, cell.label); return; }
-    if (cell.kind === "fleet") {
-      const name = cell.faction[0].toUpperCase() + cell.faction.slice(1);
-      setHint(`${name} Fleet — ${cell.count} ship${cell.count === 1 ? "" : "s"}.`);
-      return;
-    }
     setHint(cell.kind === "belt" ? "Asteroid Belt — no bodies to explore." : `${cell.label} — nothing to zoom into yet.`);
   };
 
