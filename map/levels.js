@@ -109,7 +109,7 @@ export function celestialBodyLevel(systemId, bodyId) {
     ...moons.map(name => ({ id: name.toLowerCase(), label: name, kind: "moon" })),
     { id: "battle", label: "Enter Battle", kind: "battle-link", href: "battle.html" },
   ];
-  const board = radialBoard({ id: "body", label, kind: "body-center", size: SIZE[bodyId] || 0 }, items);
+  const board = radialBoard({ id: bodyId, label, kind: "body-center", size: SIZE[bodyId] || 0 }, items);
   return { title: label, hs: hsForRadius(board.radius), ...board };
 }
 

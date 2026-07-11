@@ -25,6 +25,25 @@ const STROKE = {
   "body-center": "#ffd166", "battle-link": "#ff5a5a", moon: "#9fb3c8",
 };
 
+// Per-planet colors (loosely evocative of the real thing) override the
+// generic "planet"/"body-center" kind colors above -- Jupiter still reads
+// as Jupiter whether it's a tile on the Star Map or the centerpiece of its
+// own CelestialBody view.
+const PLANET_COLORS = {
+  mercury: { fill: "#3a3a3a", stroke: "#9e9e9e" },
+  venus:   { fill: "#5c5030", stroke: "#f0d9a0" },
+  earth:   { fill: "#1a3a5c", stroke: "#4a9eff" },
+  mars:    { fill: "#5c2a1a", stroke: "#ff6b4a" },
+  jupiter: { fill: "#5c4020", stroke: "#e0a050" },
+  saturn:  { fill: "#5c4a20", stroke: "#e0c070" },
+  uranus:  { fill: "#1a4a4a", stroke: "#7de8e8" },
+  neptune: { fill: "#1a2a5c", stroke: "#5a7dff" },
+};
+function colorsFor(cell) {
+  const p = PLANET_COLORS[cell.id];
+  return p || { fill: FILL[cell.kind] || "#1a2133", stroke: STROKE[cell.kind] || "#2a3350" };
+}
+
 // Pixel position of a hex, relative to nothing but its own (c,r) -- same
 // formula as hexgrid.js's hexCenter with ox=oy=0, so subtracting two of
 // these gives a correct offset between two positions (parity and all)
@@ -67,7 +86,7 @@ function drawSubBoardPreview(grid, cell, subBoard) {
     const [x, y] = localPx(sc.pos, miniHs);
     grid.ctx.beginPath();
     grid.ctx.arc(tx + (x - ccx), ty + (y - ccy), Math.max(1.5, miniHs * (0.6 + (sc.size || 0) * 0.5)), 0, 7);
-    grid.ctx.fillStyle = STROKE[sc.kind] || "#d7deef";
+    grid.ctx.fillStyle = colorsFor(sc).stroke;
     grid.ctx.fill();
   }
 }
@@ -97,9 +116,9 @@ function render() {
     const [x, y] = grid.hexCenter(c, r);
     const cell = cellAt(c, r);
     grid.hexPath(x, y, grid.hs - 1.5);
-    grid.ctx.fillStyle = cell ? FILL[cell.kind] || "#1a2133" : "#131826";
+    grid.ctx.fillStyle = cell ? colorsFor(cell).fill : "#131826";
     grid.ctx.fill();
-    grid.ctx.strokeStyle = cell ? STROKE[cell.kind] || "#2a3350" : "#2a3350";
+    grid.ctx.strokeStyle = cell ? colorsFor(cell).stroke : "#2a3350";
     grid.ctx.lineWidth = cell ? 2 : 1;
     grid.ctx.stroke();
   }
