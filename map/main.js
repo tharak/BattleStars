@@ -1,5 +1,5 @@
 import { makeHexGrid } from "./hexgrid.js";
-import { UNIVERSE, SYSTEMS, celestialBodyLevel, bodyLabel } from "./levels.js";
+import { UNIVERSE, SYSTEMS, celestialBodyLevel } from "./levels.js";
 import { hexDist } from "../battle/hexmath.js";
 
 const canvas = document.getElementById("cv");
@@ -13,16 +13,16 @@ let path = [{ level: "universe", label: "Universe" }];
 function levelData(entry) {
   if (entry.level === "universe") return UNIVERSE;
   if (entry.level === "system") return SYSTEMS[entry.systemId];
-  return celestialBodyLevel(bodyLabel(entry.systemId, entry.bodyId));
+  return celestialBodyLevel(entry.systemId, entry.bodyId);
 }
 
 const FILL = {
   system: "#3a2f6a", star: "#5a4a1a", planet: "#1a3a5c", belt: "#2a2a2a",
-  "body-center": "#5a4a1a", "battle-link": "#5c1a2a",
+  "body-center": "#5a4a1a", "battle-link": "#5c1a2a", moon: "#2e3644",
 };
 const STROKE = {
   system: "#a78bfa", star: "#ffd166", planet: "#4a9eff", belt: "#666",
-  "body-center": "#ffd166", "battle-link": "#ff5a5a",
+  "body-center": "#ffd166", "battle-link": "#ff5a5a", moon: "#9fb3c8",
 };
 
 function render() {

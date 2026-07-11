@@ -2,11 +2,10 @@
 // battle.html/battle/* unchanged -- CelestialBody hexes link out to it.
 //
 // This is a test fixture, not real astronomy: Sol is the only system in the
-// universe for now, and every celestial body opens the same generic
-// placeholder view (labeled with its own name) since we don't have
-// per-body data yet.
+// universe for now, and we only have moon data for the bodies with notable
+// moons -- others just get an empty ring around them.
 
-import { hexDist, neighbor } from "../battle/hexmath.js";
+import { neighbor } from "../battle/hexmath.js";
 
 export const UNIVERSE = {
   title: "Universe",
@@ -16,55 +15,62 @@ export const UNIVERSE = {
   ],
 };
 
-// A system board is a hexagon (radius hexes around center, same inBounds
-// mask idea as the Battle board in battle/config.js) with the star at its
-// exact middle. Bodies radiate outward in straight rays -- one of 6
-// directions each, walked step-by-step with hexmath's neighbor() -- at a
-// hex distance from the star equal to their orbital rank, so distance from
-// center still reflects real relative position (closer orbit = closer hex)
-// even though the hex grid can't hold true-to-scale AU distances.
-function systemBoard(center, radius, star, bodies) {
+// A radial board is a hexagon (radius hexes around a center hex, same
+// inBounds mask idea as the Battle board in battle/config.js) with one
+// object at its exact middle -- a star with its planets, or a body with its
+// moons. Satellites radiate outward in straight rays -- one of 6 directions
+// each, walked step-by-step with hexmath's neighbor() -- at a hex distance
+// from the center equal to their orbital rank, so distance from center
+// still reflects real relative position (closer orbit = closer hex) even
+// though the hex grid can't hold true-to-scale AU/km distances.
+function radialBoard(radius, centerCell, items) {
+  const center = [radius, radius];
   const walk = (dir, steps) => { let p = center; for (let i = 0; i < steps; i++) p = neighbor(p, dir); return p; };
-  const cols = center[0] + radius + 1, rows = center[1] + radius + 1;
-  const cells = [{ id: star.id, pos: center, label: star.label, kind: "star" }];
-  bodies.forEach((b, i) => {
-    const dir = i % 6, dist = i + 1;
-    const pos = walk(dir, dist);
-    cells.push(b.inert
-      ? { id: b.id, pos, label: b.label, kind: "belt" }
-      : { id: b.id, pos, label: b.label, kind: "planet", enter: { level: "body", systemId: "sol", bodyId: b.id } });
-  });
-  return { cols, rows, center, radius, cells };
+  const cells = [{ ...centerCell, pos: center }];
+  items.forEach((item, i) => cells.push({ ...item, pos: walk(i % 6, i + 1) }));
+  return { cols: radius * 2 + 1, rows: radius * 2 + 1, center, radius, cells };
 }
 
 export const SYSTEMS = {
   sol: {
     title: "Sol System",
     hs: 24,
-    ...systemBoard([9, 9], 9, { id: "sun", label: "Sun" }, [
-      { id: "mercury", label: "Mercury" },
-      { id: "venus",   label: "Venus" },
-      { id: "earth",   label: "Earth" },
-      { id: "mars",    label: "Mars" },
-      { id: "belt",    label: "Asteroid Belt", inert: true },
-      { id: "jupiter", label: "Jupiter" },
-      { id: "saturn",  label: "Saturn" },
-      { id: "uranus",  label: "Uranus" },
-      { id: "neptune", label: "Neptune" },
+    ...radialBoard(9, { id: "sun", label: "Sun", kind: "star" }, [
+      { id: "mercury", label: "Mercury", kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "mercury" } },
+      { id: "venus",   label: "Venus",   kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "venus" } },
+      { id: "earth",   label: "Earth",   kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "earth" } },
+      { id: "mars",    label: "Mars",    kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "mars" } },
+      { id: "belt",    label: "Asteroid Belt", kind: "belt" },
+      { id: "jupiter", label: "Jupiter", kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "jupiter" } },
+      { id: "saturn",  label: "Saturn",  kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "saturn" } },
+      { id: "uranus",  label: "Uranus",  kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "uranus" } },
+      { id: "neptune", label: "Neptune", kind: "planet", enter: { level: "body", systemId: "sol", bodyId: "neptune" } },
     ]),
   },
 };
 
-// Same placeholder layout for every body: the body itself in the middle,
-// one hex that drops down into the existing Battle prototype.
-export function celestialBodyLevel(bodyLabel) {
+// Only the bodies with well-known moons get any -- everyone else just has
+// an empty ring around them (still hexagonal, still centered on the body).
+const MOONS = {
+  earth:   ["Moon"],
+  mars:    ["Phobos", "Deimos"],
+  jupiter: ["Io", "Europa", "Ganymede", "Callisto"],
+  saturn:  ["Titan", "Rhea", "Iapetus", "Dione", "Tethys"],
+  uranus:  ["Titania", "Oberon", "Miranda", "Ariel", "Umbriel"],
+  neptune: ["Triton"],
+};
+
+export function celestialBodyLevel(systemId, bodyId) {
+  const label = bodyLabel(systemId, bodyId);
+  const moons = MOONS[bodyId] || [];
+  const radius = moons.length + 1; // +1 ring for the Enter Battle hex
+  const items = [
+    ...moons.map(name => ({ id: name.toLowerCase(), label: name, kind: "moon" })),
+    { id: "battle", label: "Enter Battle", kind: "battle-link", href: "battle.html" },
+  ];
   return {
-    title: bodyLabel,
-    cols: 7, rows: 5, hs: 30,
-    cells: [
-      { id: "body", pos: [3, 2], label: bodyLabel, kind: "body-center" },
-      { id: "battle", pos: [5, 2], label: "Enter Battle", kind: "battle-link", href: "battle.html" },
-    ],
+    title: label, hs: Math.max(18, 40 - radius * 3),
+    ...radialBoard(radius, { id: "body", label, kind: "body-center" }, items),
   };
 }
 
