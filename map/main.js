@@ -25,6 +25,20 @@ const STROKE = {
   "body-center": "#ffd166", "battle-link": "#ff5a5a", moon: "#9fb3c8",
 };
 
+// Every populated hex shows a small hex-of-hexes drawn inside it -- a purely
+// decorative hint that there's another map to zoom into, echoing the same
+// shape one level down. Pure pixel-space trig, not tied to grid coordinates.
+function drawSubHexes(grid, x, y, strokeColor) {
+  const s = grid.hs * 0.3, w = s * Math.sqrt(3);
+  const offsets = [[0, 0], [w, 0], [-w, 0], [w / 2, -s * 1.5], [-w / 2, -s * 1.5], [w / 2, s * 1.5], [-w / 2, s * 1.5]];
+  grid.ctx.save();
+  grid.ctx.globalAlpha = 0.55;
+  grid.ctx.strokeStyle = strokeColor;
+  grid.ctx.lineWidth = 1;
+  for (const [dx, dy] of offsets) { grid.hexPath(x + dx, y + dy, s - 0.8); grid.ctx.stroke(); }
+  grid.ctx.restore();
+}
+
 function render() {
   const entry = path[path.length - 1];
   const data = levelData(entry);
@@ -53,6 +67,7 @@ function render() {
     grid.ctx.strokeStyle = cell ? STROKE[cell.kind] || "#2a3350" : "#2a3350";
     grid.ctx.lineWidth = cell ? 2 : 1;
     grid.ctx.stroke();
+    if (cell) drawSubHexes(grid, x, y, STROKE[cell.kind] || "#2a3350");
   }
   for (const cell of data.cells) {
     const [x, y] = grid.hexCenter(cell.pos[0], cell.pos[1]);
