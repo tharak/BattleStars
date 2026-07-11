@@ -48,7 +48,9 @@ function radialBoard(centerCell, items, gap = 1) {
   const frontier = {}; // dir -> outer edge (hex distance from center) claimed so far
   const placements = items.map((item, i) => {
     const dir = i % 6, r = item.size || 0;
-    const dist = (frontier[dir] ?? centerRadius) + r + gap;
+    // An item can specify its own gap (e.g. a moon placed by real relative
+    // distance), overriding the board's default for everyone else.
+    const dist = (frontier[dir] ?? centerRadius) + r + (item.gap ?? gap);
     frontier[dir] = dist + r;
     return { item, dir, dist };
   });
@@ -104,6 +106,22 @@ const MOONS = {
   neptune: ["Triton"],
 };
 
+// Real orbital distance from the parent, in parent-radii (semi-major axis
+// / parent radius) -- Phobos orbits barely above Mars, Iapetus is nearly
+// a AU-scale outlier around Saturn. Used only to rank/scale hex spacing
+// (gapForRatio below), not as a literal to-scale distance.
+const MOON_DISTANCE_RATIO = {
+  moon: 60.3, phobos: 2.76, deimos: 6.92,
+  io: 6.03, europa: 9.6, ganymede: 15.3, callisto: 26.9,
+  titan: 20.98, rhea: 9.05, iapetus: 61.15, dione: 6.48, tethys: 5.06,
+  titania: 17.2, oberon: 23.0, miranda: 5.12, ariel: 7.53, umbriel: 10.49,
+  triton: 14.4,
+};
+// Log-compressed so the ~22x real spread (Phobos to Iapetus) becomes a
+// manageable ~2-5 hex gap while still ordering/spacing moons the same way
+// their real distances do.
+const gapForRatio = ratio => Math.max(1, Math.round(1 + 2 * Math.log10(ratio)));
+
 // Starting fleets: each faction's ships are placed as a single hex on
 // their home body's own CelestialBody map (not the Star Map -- the planet
 // itself is the tile there; fleets live one level down, "at" that planet).
@@ -156,7 +174,10 @@ export function celestialBodyLevel(systemId, bodyId) {
   const label = bodyLabel(systemId, bodyId);
   const moons = MOONS[bodyId] || [];
   const items = [
-    ...moons.map(name => ({ id: name.toLowerCase(), label: name, kind: "moon" })),
+    ...moons.map(name => {
+      const id = name.toLowerCase();
+      return { id, label: name, kind: "moon", gap: gapForRatio(MOON_DISTANCE_RATIO[id] || 10) };
+    }),
     ...fleetAt(bodyId),
   ];
   const board = radialBoard({ id: bodyId, label, kind: "body-center", size: SIZE[bodyId] || 0 }, items);
