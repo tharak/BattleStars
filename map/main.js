@@ -25,6 +25,43 @@ const STROKE = {
   "body-center": "#ffd166", "battle-link": "#ff5a5a", moon: "#9fb3c8",
 };
 
+// Pixel position of a hex, relative to nothing but its own (c,r) -- same
+// formula as hexgrid.js's hexCenter with ox=oy=0, so subtracting two of
+// these gives a correct offset between two positions (parity and all)
+// without needing a whole separate grid.
+const localPx = (pos, hs) => [(pos[0] + 0.5 * (pos[1] & 1)) * hs * Math.sqrt(3), pos[1] * hs * 1.5];
+
+// How far a board's own content reaches from its center, in pixels at a
+// given hex size -- used both to measure Sol's tile (at the Universe
+// board's real hs) and the target system's full layout (at hs=1, then
+// solved for the hs that makes it fit).
+function footprintPx(board, hs) {
+  const [ccx, ccy] = localPx(board.center, hs);
+  let max = 0;
+  for (const cell of board.cells) {
+    const [x, y] = localPx(cell.pos, hs);
+    max = Math.max(max, Math.hypot(x - ccx, y - ccy) + (cell.size || 0) * hs * 1.5);
+  }
+  return max;
+}
+
+// A live miniature of the target system (Sun/planets at their real
+// relative positions and sizes) drawn as small dots inside a Universe tile
+// -- a preview of what's really there, not a decorative pattern.
+function drawSystemPreview(grid, cell, sysBoard) {
+  const [tx, ty] = grid.hexCenter(cell.pos[0], cell.pos[1]);
+  const tileRadiusPx = (cell.size || 0) * grid.hs * 1.5 + grid.hs;
+  const miniHs = tileRadiusPx / (footprintPx(sysBoard, 1) * 1.15);
+  const [ccx, ccy] = localPx(sysBoard.center, miniHs);
+  for (const sc of sysBoard.cells) {
+    const [x, y] = localPx(sc.pos, miniHs);
+    grid.ctx.beginPath();
+    grid.ctx.arc(tx + (x - ccx), ty + (y - ccy), Math.max(1.5, miniHs * (0.6 + (sc.size || 0) * 0.5)), 0, 7);
+    grid.ctx.fillStyle = STROKE[sc.kind] || "#d7deef";
+    grid.ctx.fill();
+  }
+}
+
 function render() {
   const entry = path[path.length - 1];
   const data = levelData(entry);
@@ -57,11 +94,15 @@ function render() {
     grid.ctx.stroke();
   }
   for (const cell of data.cells) {
+    const sysBoard = cell.enter?.level === "system" ? SYSTEMS[cell.enter.systemId] : null;
+    if (sysBoard) drawSystemPreview(grid, cell, sysBoard);
     const [x, y] = grid.hexCenter(cell.pos[0], cell.pos[1]);
     grid.ctx.fillStyle = "#d7deef";
     grid.ctx.font = "bold 11px system-ui";
     grid.ctx.textAlign = "center";
-    grid.ctx.fillText(cell.label, x, y + 4);
+    // A system-preview cell's center is busy with the mini graphic -- put
+    // its label below instead of overlapping it.
+    grid.ctx.fillText(cell.label, x, sysBoard ? y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13 : y + 4);
   }
 
   canvas.onclick = ev => {
