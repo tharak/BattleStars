@@ -15,13 +15,11 @@ export const UNIVERSE = {
   ],
 };
 
-// Relative body sizes, in hex-blob radius (0 = a single hex): Mars is the
-// smallest visible planet (radius 0), Mercury is smaller still so shares
-// its tier; Earth/Venus are the next size up; Uranus/Neptune (ice giants)
-// bigger again; Jupiter/Saturn (gas giants) biggest of the planets. The Sun
-// dwarfs all of them. Not to scale -- just ranked into a few hex-sized tiers.
+// Relative body sizes, in hex-blob radius (0 = a single hex). Not to
+// scale -- just per spec: Mars/Mercury radius 0, Earth/Venus radius 3,
+// Uranus/Neptune radius 2, Jupiter/Saturn radius 3, Sun radius 4.
 export const SIZE = {
-  sun: 4, mercury: 0, venus: 1, earth: 1, mars: 0, belt: 0,
+  sun: 4, mercury: 0, venus: 3, earth: 3, mars: 0, belt: 0,
   jupiter: 3, saturn: 3, uranus: 2, neptune: 2,
 };
 
