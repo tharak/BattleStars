@@ -32,7 +32,11 @@ function render() {
     ? (c, r) => hexDist(data.center, [c, r]) <= data.radius
     : undefined;
   const grid = makeHexGrid(canvas, { cols: data.cols, rows: data.rows, hs: data.hs, ...(inBounds && { inBounds }) });
-  const byPos = new Map(data.cells.map(c => [c.pos[0] + "," + c.pos[1], c]));
+  // A cell can be a multi-hex blob (cell.size = hexDist radius, not just a
+  // single hex), so "what's at (c,r)" is a distance test against every
+  // cell rather than an exact-position lookup. Blobs are placed (see
+  // radialBoard in levels.js) so they never overlap, so at most one matches.
+  const cellAt = (c, r) => data.cells.find(cell => hexDist(cell.pos, [c, r]) <= (cell.size || 0));
 
   grid.ctx.fillStyle = "#0b0e14";
   grid.ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -42,7 +46,7 @@ function render() {
   for (let r = 0; r < data.rows; r++) for (let c = 0; c < data.cols; c++) {
     if (!grid.inBounds(c, r)) continue;
     const [x, y] = grid.hexCenter(c, r);
-    const cell = byPos.get(c + "," + r);
+    const cell = cellAt(c, r);
     grid.hexPath(x, y, grid.hs - 1.5);
     grid.ctx.fillStyle = cell ? FILL[cell.kind] || "#1a2133" : "#131826";
     grid.ctx.fill();
@@ -55,14 +59,14 @@ function render() {
     grid.ctx.fillStyle = "#d7deef";
     grid.ctx.font = "bold 11px system-ui";
     grid.ctx.textAlign = "center";
-    grid.ctx.fillText(cell.label, x, y + grid.hs + 13);
+    grid.ctx.fillText(cell.label, x, y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13);
   }
 
   canvas.onclick = ev => {
     const rect = canvas.getBoundingClientRect();
     const h = grid.pixelToHex(ev.clientX - rect.left, ev.clientY - rect.top);
     if (!h) return;
-    const cell = byPos.get(h[0] + "," + h[1]);
+    const cell = cellAt(h[0], h[1]);
     if (!cell) { setHint("Empty space — nothing here."); return; }
     if (cell.href) { window.location.href = cell.href; return; }
     if (cell.enter) { zoomIn(cell.enter, cell.label); return; }
