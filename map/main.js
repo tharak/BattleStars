@@ -45,15 +45,25 @@ function footprintPx(board, hs) {
   return max;
 }
 
-// A live miniature of the target system (Sun/planets at their real
-// relative positions and sizes) drawn as small dots inside a Universe tile
-// -- a preview of what's really there, not a decorative pattern.
-function drawSystemPreview(grid, cell, sysBoard) {
+// The board one zoom level down from this cell, if it has one -- a system
+// (Sol's planets), a body (a planet's moons), or null for cells that don't
+// lead anywhere further down this chain (a moon, the Enter Battle link).
+function subBoardFor(enter) {
+  if (enter?.level === "system") return SYSTEMS[enter.systemId];
+  if (enter?.level === "body") return celestialBodyLevel(enter.systemId, enter.bodyId);
+  return null;
+}
+
+// A live miniature of what's really inside a cell -- Sol's Sun/planets, or
+// a planet's moons -- drawn as small dots at their real relative positions
+// and sizes, scaled to fit inside this cell's own tile. A preview of real
+// content, not a decorative pattern.
+function drawSubBoardPreview(grid, cell, subBoard) {
   const [tx, ty] = grid.hexCenter(cell.pos[0], cell.pos[1]);
   const tileRadiusPx = (cell.size || 0) * grid.hs * 1.5 + grid.hs;
-  const miniHs = tileRadiusPx / (footprintPx(sysBoard, 1) * 1.15);
-  const [ccx, ccy] = localPx(sysBoard.center, miniHs);
-  for (const sc of sysBoard.cells) {
+  const miniHs = tileRadiusPx / (footprintPx(subBoard, 1) * 1.15);
+  const [ccx, ccy] = localPx(subBoard.center, miniHs);
+  for (const sc of subBoard.cells) {
     const [x, y] = localPx(sc.pos, miniHs);
     grid.ctx.beginPath();
     grid.ctx.arc(tx + (x - ccx), ty + (y - ccy), Math.max(1.5, miniHs * (0.6 + (sc.size || 0) * 0.5)), 0, 7);
@@ -94,15 +104,15 @@ function render() {
     grid.ctx.stroke();
   }
   for (const cell of data.cells) {
-    const sysBoard = cell.enter?.level === "system" ? SYSTEMS[cell.enter.systemId] : null;
-    if (sysBoard) drawSystemPreview(grid, cell, sysBoard);
+    const subBoard = subBoardFor(cell.enter);
+    if (subBoard) drawSubBoardPreview(grid, cell, subBoard);
     const [x, y] = grid.hexCenter(cell.pos[0], cell.pos[1]);
     grid.ctx.fillStyle = "#d7deef";
     grid.ctx.font = "bold 11px system-ui";
     grid.ctx.textAlign = "center";
-    // A system-preview cell's center is busy with the mini graphic -- put
-    // its label below instead of overlapping it.
-    grid.ctx.fillText(cell.label, x, sysBoard ? y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13 : y + 4);
+    // A cell with a preview has its center busy with the mini graphic --
+    // put its label below instead of overlapping it.
+    grid.ctx.fillText(cell.label, x, subBoard ? y + (cell.size || 0) * grid.hs * 1.5 + grid.hs + 13 : y + 4);
   }
 
   canvas.onclick = ev => {
