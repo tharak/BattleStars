@@ -1,13 +1,6 @@
 import { makeHexGrid } from "./hexgrid.js";
 import { UNIVERSE, SYSTEMS, celestialBodyLevel } from "./levels.js";
-import { hexDist, neighbor } from "../battle/hexmath.js";
-
-// hexPath's corner k is at angle (60k - 90); the edge from corner k to
-// corner k+1 faces the neighbor in this direction (see hexmath's CUBE_DIRS/
-// DIR_ANGLE) -- used to skip the internal edges of a multi-hex blob so it
-// reads as one merged shape instead of a cluster of individually-outlined
-// tiles.
-const EDGE_TO_DIR = [1, 0, 5, 4, 3, 2];
+import { hexDist } from "../battle/hexmath.js";
 
 const canvas = document.getElementById("cv");
 const breadcrumb = document.getElementById("breadcrumb");
@@ -56,34 +49,12 @@ function render() {
     if (!grid.inBounds(c, r)) continue;
     const [x, y] = grid.hexCenter(c, r);
     const cell = cellAt(c, r);
-    const s = grid.hs - 1.5;
-    grid.hexPath(x, y, s);
+    grid.hexPath(x, y, grid.hs - 1.5);
     grid.ctx.fillStyle = cell ? FILL[cell.kind] || "#1a2133" : "#131826";
     grid.ctx.fill();
-    if (!cell) {
-      // A blob's boundary edge is already stroked once, in its own accent
-      // color, from the populated side below -- skip it here so it isn't
-      // doubled up with this grey line underneath it.
-      grid.ctx.strokeStyle = "#2a3350";
-      grid.ctx.lineWidth = 1;
-      for (let k = 0; k < 6; k++) {
-        const n = neighbor([c, r], EDGE_TO_DIR[k]);
-        if (cellAt(n[0], n[1])) continue;
-        grid.edgePath(x, y, s, k);
-        grid.ctx.stroke();
-      }
-      continue;
-    }
-    // Same-owner blob: only stroke edges that border a different cell (or
-    // empty space), so adjacent same-owner hexes merge into one shape.
-    grid.ctx.strokeStyle = STROKE[cell.kind] || "#2a3350";
-    grid.ctx.lineWidth = 2;
-    for (let k = 0; k < 6; k++) {
-      const n = neighbor([c, r], EDGE_TO_DIR[k]);
-      if (cellAt(n[0], n[1]) === cell) continue;
-      grid.edgePath(x, y, s, k);
-      grid.ctx.stroke();
-    }
+    grid.ctx.strokeStyle = cell ? STROKE[cell.kind] || "#2a3350" : "#2a3350";
+    grid.ctx.lineWidth = cell ? 2 : 1;
+    grid.ctx.stroke();
   }
   for (const cell of data.cells) {
     const [x, y] = grid.hexCenter(cell.pos[0], cell.pos[1]);
