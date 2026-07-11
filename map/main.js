@@ -1,6 +1,9 @@
 import { makeHexGrid } from "./hexgrid.js";
-import { UNIVERSE, SYSTEMS, celestialBodyLevel, formationBoard, FLEET_FORMATIONS, FORMATION_NAMES } from "./levels.js";
-import { hexDist, DIR_ANGLE } from "../battle/hexmath.js";
+import { UNIVERSE, SYSTEMS, celestialBodyLevel, formationBoard, FLEET_FORMATIONS, FORMATION_NAMES, FACTIONS } from "./levels.js";
+import { hexDist, DIR_ANGLE, facingArrowPoints } from "../battle/hexmath.js";
+import { ACCENT, BOARD_TINT } from "../battle/colors.js";
+
+const capitalize = s => s[0].toUpperCase() + s.slice(1);
 
 const canvas = document.getElementById("cv");
 const breadcrumb = document.getElementById("breadcrumb");
@@ -33,7 +36,8 @@ const STROKE = {
 // Per-planet colors (loosely evocative of the real thing) override the
 // generic "planet"/"body-center" kind colors above -- Jupiter still reads
 // as Jupiter whether it's a tile on the Star Map or the centerpiece of its
-// own CelestialBody view.
+// own CelestialBody view. Merged with MOON_COLORS below into one id-keyed
+// table (ID_COLORS) since both are looked up the same way, by cell.id.
 const PLANET_COLORS = {
   mercury: { fill: "#3a3a3a", stroke: "#9e9e9e" },
   venus:   { fill: "#5c5030", stroke: "#f0d9a0" },
@@ -70,10 +74,12 @@ const MOON_COLORS = {
   umbriel:  { fill: "#242424", stroke: "#686868" },
   triton:   { fill: "#2a3050", stroke: "#8098d8" },
 };
+const ID_COLORS = { ...PLANET_COLORS, ...MOON_COLORS };
 
-// Faction fleet colors (see FACTIONS in levels.js) -- a fleet cell carries
-// its faction on `cell.faction`, checked before the id-based lookups since
-// fleet ids are per-faction (blue-fleet, ...), not shared like planets/moons.
+// Faction fleet/ship colors (see FACTIONS in levels.js) -- checked via
+// cell.faction rather than cell.id, since fleet/ship ids are per-instance
+// (blue-fleet, blue-ship-3, ...), not a shared small id space like
+// planets/moons.
 const FACTION_COLORS = {
   blue:  { fill: "#1a3a6e", stroke: "#4a9eff" },
   green: { fill: "#1a5c2a", stroke: "#4ade80" },
@@ -81,8 +87,7 @@ const FACTION_COLORS = {
 };
 
 function colorsFor(cell) {
-  const f = cell.faction && FACTION_COLORS[cell.faction];
-  const p = f || PLANET_COLORS[cell.id] || MOON_COLORS[cell.id];
+  const p = (cell.faction && FACTION_COLORS[cell.faction]) || ID_COLORS[cell.id];
   return p || { fill: FILL[cell.kind] || "#1a2133", stroke: STROKE[cell.kind] || "#2a3350" };
 }
 
@@ -92,16 +97,15 @@ function colorsFor(cell) {
 // without needing a whole separate grid.
 const localPx = (pos, hs) => [(pos[0] + 0.5 * (pos[1] & 1)) * hs * Math.sqrt(3), pos[1] * hs * 1.5];
 
-// How far a board's own content reaches from its center, in pixels at a
-// given hex size -- used both to measure Sol's tile (at the Universe
-// board's real hs) and the target system's full layout (at hs=1, then
-// solved for the hs that makes it fit).
-function footprintPx(board, hs) {
-  const [ccx, ccy] = localPx(board.center, hs);
+// How far a board's own content reaches from its center, in "hs=1" units --
+// only ever measured at that fixed scale (to solve for the miniHs that
+// makes it fit a tile below), so hs isn't a parameter.
+function footprintAt1(board) {
+  const [ccx, ccy] = localPx(board.center, 1);
   let max = 0;
   for (const cell of board.cells) {
-    const [x, y] = localPx(cell.pos, hs);
-    max = Math.max(max, Math.hypot(x - ccx, y - ccy) + (cell.size || 0) * hs * 1.5);
+    const [x, y] = localPx(cell.pos, 1);
+    max = Math.max(max, Math.hypot(x - ccx, y - ccy) + (cell.size || 0) * 1.5);
   }
   return max;
 }
@@ -118,11 +122,11 @@ function subBoardFor(enter) {
 // A live miniature of what's really inside a cell -- Sol's Sun/planets, or
 // a planet's moons -- drawn as small dots at their real relative positions
 // and sizes, scaled to fit inside this cell's own tile. A preview of real
-// content, not a decorative pattern.
-function drawSubBoardPreview(grid, cell, subBoard) {
-  const [tx, ty] = grid.hexCenter(cell.pos[0], cell.pos[1]);
+// content, not a decorative pattern. (tx,ty) is the tile's own already-
+// computed on-screen center -- the caller has it, no need to recompute it.
+function drawSubBoardPreview(grid, cell, subBoard, tx, ty) {
   const tileRadiusPx = (cell.size || 0) * grid.hs * 1.5 + grid.hs;
-  const miniHs = tileRadiusPx / (footprintPx(subBoard, 1) * 1.15);
+  const miniHs = tileRadiusPx / (footprintAt1(subBoard) * 1.15);
   const [ccx, ccy] = localPx(subBoard.center, miniHs);
   for (const sc of subBoard.cells) {
     const [x, y] = localPx(sc.pos, miniHs);
@@ -151,7 +155,7 @@ function render() {
   const cellsAt = (c, r) => data.cells.filter(cell => hexDist(cell.pos, [c, r]) <= (cell.size || 0));
   const cellAt = (c, r) => cellsAt(c, r)[0];
 
-  grid.ctx.fillStyle = "#0b0e14";
+  grid.ctx.fillStyle = BOARD_TINT.bg;
   grid.ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Two passes: every hex fill/stroke first, then labels on top -- otherwise
@@ -160,30 +164,29 @@ function render() {
     if (!grid.inBounds(c, r)) continue;
     const [x, y] = grid.hexCenter(c, r);
     const cell = cellAt(c, r);
+    const colors = cell && colorsFor(cell);
     grid.hexPath(x, y, grid.hs - 1.5);
-    grid.ctx.fillStyle = cell ? colorsFor(cell).fill : "#131826";
+    grid.ctx.fillStyle = colors ? colors.fill : "#131826";
     grid.ctx.fill();
-    grid.ctx.strokeStyle = cell ? colorsFor(cell).stroke : "#2a3350";
-    grid.ctx.lineWidth = cell ? 2 : 1;
+    grid.ctx.strokeStyle = colors ? colors.stroke : "#2a3350";
+    grid.ctx.lineWidth = colors ? 2 : 1;
     grid.ctx.stroke();
     // Ship tokens get a facing arrow, same triangle battle/render.js draws
     // for a unit's facing -- this is what actually reads as "a ship" rather
     // than a plain numbered hex.
     if (cell?.kind === "ownship") {
-      const a = DIR_ANGLE[cell.facing] * Math.PI / 180;
+      const [tip, base1, base2] = facingArrowPoints(x, y, grid.hs, DIR_ANGLE[cell.facing]);
       grid.ctx.beginPath();
-      grid.ctx.moveTo(x + Math.cos(a) * (grid.hs - 4), y + Math.sin(a) * (grid.hs - 4));
-      grid.ctx.lineTo(x + Math.cos(a + 2.6) * (grid.hs - 11), y + Math.sin(a + 2.6) * (grid.hs - 11));
-      grid.ctx.lineTo(x + Math.cos(a - 2.6) * (grid.hs - 11), y + Math.sin(a - 2.6) * (grid.hs - 11));
+      grid.ctx.moveTo(...tip); grid.ctx.lineTo(...base1); grid.ctx.lineTo(...base2);
       grid.ctx.closePath();
-      grid.ctx.fillStyle = cell.isFlag ? "#ffd166" : "#d7deef";
+      grid.ctx.fillStyle = cell.isFlag ? ACCENT.flagshipArrow : "#d7deef";
       grid.ctx.fill();
     }
   }
   for (const cell of data.cells) {
-    const subBoard = subBoardFor(cell.enter);
-    if (subBoard) drawSubBoardPreview(grid, cell, subBoard);
     const [x, y] = grid.hexCenter(cell.pos[0], cell.pos[1]);
+    const subBoard = subBoardFor(cell.enter);
+    if (subBoard) drawSubBoardPreview(grid, cell, subBoard, x, y);
     grid.ctx.font = "bold 11px system-ui";
     grid.ctx.textAlign = "center";
     // A cell with a preview has its center busy with the mini graphic --
@@ -192,7 +195,7 @@ function render() {
     // A ship's number/flagship star sits right on top of its facing arrow
     // (light fill), so it needs dark text there instead of the usual light
     // label color to stay legible.
-    grid.ctx.fillStyle = cell.kind === "ownship" ? "#0b0e14" : "#d7deef";
+    grid.ctx.fillStyle = cell.kind === "ownship" ? ACCENT.labelText : "#d7deef";
     grid.ctx.fillText(cell.label, x, ly);
   }
 
@@ -212,13 +215,13 @@ function render() {
       const fleet = fleets[0];
       zoomIn(
         { level: "formation", faction: fleet.faction, formationName: FLEET_FORMATIONS[fleet.faction] },
-        `${fleet.faction[0].toUpperCase()}${fleet.faction.slice(1)} Formation`,
+        `${FACTIONS[fleet.faction].label} Formation`,
       );
       return;
     }
     const cell = hits[0];
     if (cell.enter) { zoomIn(cell.enter, cell.label); return; }
-    if (cell.kind === "ownship") { setHint(cell.label === "★" ? "Flagship" : `Ship ${cell.label}`); return; }
+    if (cell.kind === "ownship") { setHint(cell.isFlag ? "Flagship" : `Ship ${cell.label}`); return; }
     setHint(cell.kind === "belt" ? "Asteroid Belt — no bodies to explore." : `${cell.label} — nothing to zoom into yet.`);
   };
 
@@ -236,7 +239,7 @@ function renderFormationControls(entry) {
   formationButtons.innerHTML = "";
   for (const name of FORMATION_NAMES) {
     const btn = document.createElement("button");
-    btn.textContent = name[0].toUpperCase() + name.slice(1);
+    btn.textContent = capitalize(name);
     if (name === entry.formationName) btn.className = "primary";
     btn.onclick = () => { entry.formationName = name; render(); };
     formationButtons.appendChild(btn);

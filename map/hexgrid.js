@@ -1,9 +1,10 @@
-// Generic hex-grid canvas renderer shared by the three strategic zoom levels
-// (Universe, System, CelestialBody). Each level is a rectangular bounding
-// grid of pointy-top hexes at its own scale; a level can optionally supply
-// an `inBounds(c,r)` predicate (e.g. a hex-radius mask, see battle/config.js's
-// inBounds) to carve a non-rectangular board out of that grid -- cells
-// outside it are simply skipped by both drawing and hit-testing.
+// Generic hex-grid canvas renderer shared by every screen in the strategic
+// map (Universe, System, CelestialBody, and the Formation Setup screen).
+// Each screen is a rectangular bounding grid of pointy-top hexes at its own
+// scale; a screen can optionally supply an `inBounds(c,r)` predicate (e.g.
+// a hex-radius mask, see battle/config.js's inBounds) to carve a
+// non-rectangular board out of that grid -- cells outside it are simply
+// skipped by both drawing and hit-testing.
 
 export function makeHexGrid(canvas, { cols, rows, hs, ox = 40, oy = 40, inBounds = () => true }) {
   const ctx = canvas.getContext("2d");

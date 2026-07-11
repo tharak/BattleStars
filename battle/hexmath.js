@@ -7,6 +7,21 @@ export const DIR_ANGLE = [0,-60,-120,180,120,60];
 
 export const key = (c, r) => c + "," + r;
 
+// The 3 points of a facing-arrow triangle for a directional token (a
+// squadron, a formation-preview ship): tip pointing at angleDeg, base
+// swept back at +-149 degrees. Shared by every canvas that draws one
+// (battle/render.js's units, map/main.js's formation preview) so this
+// trig only exists once; each caller still does its own beginPath/fill
+// since drawing is DOM-coupled and this module deliberately isn't.
+export function facingArrowPoints(x, y, hs, angleDeg) {
+  const a = angleDeg * Math.PI / 180;
+  return [
+    [x + Math.cos(a) * (hs - 4), y + Math.sin(a) * (hs - 4)],
+    [x + Math.cos(a + 2.6) * (hs - 11), y + Math.sin(a + 2.6) * (hs - 11)],
+    [x + Math.cos(a - 2.6) * (hs - 11), y + Math.sin(a - 2.6) * (hs - 11)],
+  ];
+}
+
 export function toAxial(c, r) { return [c - ((r - (r & 1)) >> 1), r]; }
 export function fromAxial(q, r) { return [q + ((r - (r & 1)) >> 1), r]; }
 

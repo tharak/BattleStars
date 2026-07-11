@@ -1,7 +1,7 @@
 // Canvas rendering. Reads component data via queries.js and colors via
 // colors.js -- never mutates game state.
 import { COLS, ROWS, RANGE, CMD_R, HS, HW, OX, OY, MoraleState, inBounds } from "./config.js";
-import { DIR_ANGLE, hexDist, losClear, inFireArc, key } from "./hexmath.js";
+import { DIR_ANGLE, hexDist, losClear, inFireArc, key, facingArrowPoints } from "./hexmath.js";
 import { inSetupZone } from "./formations.js";
 import { SIDE_COLORS, STATE_COLORS, ACCENT, BOARD_TINT } from "./colors.js";
 import { LINE_WIDTH, LASER_HALO_ALPHA } from "./dimensions.js";
@@ -101,11 +101,9 @@ function renderFrame(state) {
       cx2.lineWidth = p === setup.flagShip ? LINE_WIDTH.setupFlagshipBorder : LINE_WIDTH.setupShipBorder;
       cx2.stroke();
       if (p === setup.selected) { hexPath(x, y, HS - 1); cx2.strokeStyle = ACCENT.selectionOutline; cx2.lineWidth = LINE_WIDTH.setupSelectionOutline; cx2.stroke(); }
-      const a = DIR_ANGLE[p.facing] * Math.PI / 180;
+      const [tip, base1, base2] = facingArrowPoints(x, y, HS, DIR_ANGLE[p.facing]);
       cx2.beginPath();
-      cx2.moveTo(x + Math.cos(a) * (HS - 4), y + Math.sin(a) * (HS - 4));
-      cx2.lineTo(x + Math.cos(a + 2.6) * (HS - 11), y + Math.sin(a + 2.6) * (HS - 11));
-      cx2.lineTo(x + Math.cos(a - 2.6) * (HS - 11), y + Math.sin(a - 2.6) * (HS - 11));
+      cx2.moveTo(...tip); cx2.lineTo(...base1); cx2.lineTo(...base2);
       cx2.closePath(); cx2.fillStyle = p === setup.flagShip ? ACCENT.flagshipArrow : ACCENT.labelText; cx2.fill();
       if (p === setup.flagShip) {
         cx2.fillStyle = ACCENT.labelText; cx2.font = "bold 9px system-ui"; cx2.textAlign = "center";
@@ -150,11 +148,9 @@ function renderFrame(state) {
     // into the ★ label, which is drawn in the same dark color as a plain
     // arrow would be) so it doubles as an at-a-glance flagship marker.
     const isFlag = Q.isFlagship(state, e);
-    const a = DIR_ANGLE[Q.facingOf(state, e)] * Math.PI / 180;
+    const [tip, base1, base2] = facingArrowPoints(x, y, HS, DIR_ANGLE[Q.facingOf(state, e)]);
     cx2.beginPath();
-    cx2.moveTo(x + Math.cos(a) * (HS - 4), y + Math.sin(a) * (HS - 4));
-    cx2.lineTo(x + Math.cos(a + 2.6) * (HS - 11), y + Math.sin(a + 2.6) * (HS - 11));
-    cx2.lineTo(x + Math.cos(a - 2.6) * (HS - 11), y + Math.sin(a - 2.6) * (HS - 11));
+    cx2.moveTo(...tip); cx2.lineTo(...base1); cx2.lineTo(...base2);
     cx2.closePath(); cx2.fillStyle = isFlag ? ACCENT.flagshipArrow : ACCENT.labelText; cx2.fill();
     // label + flagship star
     cx2.fillStyle = ACCENT.labelText; cx2.font = "bold 9px system-ui"; cx2.textAlign = "center";

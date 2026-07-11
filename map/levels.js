@@ -140,9 +140,7 @@ function fleetAt(bodyId) {
   const entry = Object.entries(FACTIONS).find(([, f]) => f.startAt === bodyId);
   if (!entry) return [];
   const [faction] = entry;
-  return [{
-    id: `${faction}-fleet`, label: String(SHIPS_PER_FACTION), kind: "fleet", faction, count: SHIPS_PER_FACTION,
-  }];
+  return [{ id: `${faction}-fleet`, label: String(SHIPS_PER_FACTION), kind: "fleet", faction }];
 }
 
 // Each faction's chosen formation, in memory only (resets on reload) --
