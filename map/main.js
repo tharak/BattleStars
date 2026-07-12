@@ -152,6 +152,7 @@ function renderUniverse(entry, data) {
   };
   canvas.onwheel = null;
   canvas.onmousedown = null;
+  canvas.oncontextmenu = null;
   canvas.style.cursor = "";
 
   battleControls.style.display = "none";
@@ -325,7 +326,9 @@ function shipTriangle(x, y, s, angleDeg) {
   ];
 }
 
-// Click-and-drag panning, only reachable once the 2D fallback is active.
+// Right-button click-and-drag panning, only reachable once the 2D fallback
+// is active (mirrors the 3D scene's right-drag pan -- see scene3d.js).
+// Left stays click-only, reserved for selecting/focusing bodies and fleets.
 // Tracked at module scope (not inside renderSystem2D) since a drag can
 // outlive any single render -- mousemove/mouseup listen on window so the
 // drag keeps tracking even if the cursor leaves the canvas. justDragged
@@ -435,10 +438,11 @@ function renderSystem2D(entry, data) {
   ctx.restore();
 
   canvas.onmousedown = ev => {
-    if (ev.button !== 0) return;
+    if (ev.button !== 2) return;
     dragState = { startClientX: ev.clientX, startClientY: ev.clientY, startCameraX: camera2d.x, startCameraY: camera2d.y, moved: false };
     canvas.style.cursor = "grabbing";
   };
+  canvas.oncontextmenu = ev => ev.preventDefault();
   canvas.style.cursor = "grab";
 
   canvas.onclick = ev => {
@@ -596,6 +600,7 @@ function renderHex(entry, data) {
   };
   canvas.onwheel = null;
   canvas.onmousedown = null;
+  canvas.oncontextmenu = null;
   canvas.style.cursor = "";
 
   battleControls.style.display = "none";

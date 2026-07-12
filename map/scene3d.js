@@ -11,7 +11,11 @@
 // ecliptic); an OrthographicCamera keeps the view free of perspective
 // distortion (the "isometric" look) while OrbitControls lets it rotate
 // freely with the mouse, which a strict fixed-angle isometric camera
-// wouldn't allow.
+// wouldn't allow. Mouse buttons: middle-drag rotates, right-drag pans
+// (ground-plane-flattened, same as the arrow keys), wheel zooms toward
+// the cursor. Left is deliberately unbound here -- map/main.js uses it
+// for clicking bodies/fleets, and it's reserved for click-and-drag
+// control of them later.
 //
 // World-space sizes are zoom-invariant by construction here -- unlike the
 // old 2D canvas version, where a moon's on-screen px size and a planet's
@@ -53,7 +57,6 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
   scene.add(new THREE.PointLight(0xfff2cc, 3.5, 0, 0)); // at the origin -- the Sun lights everything else
 
   const controls = new OrbitControls(camera, canvas);
-  controls.enablePan = false; // arrow keys pan instead -- see panCamera()
   controls.enableDamping = false;
   controls.minZoom = minZoom;
   controls.maxZoom = maxZoom;
@@ -61,6 +64,18 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
   controls.maxPolarAngle = Math.PI - 0.08;
   controls.minDistance = 10;
   controls.maxDistance = 4000;
+  // Zoom toward wherever the cursor is (native to this camera type/Three
+  // version) rather than always toward the view center.
+  controls.zoomToCursor = true;
+  // Left button is deliberately left unbound (see mouseButtons below) so
+  // it's free for body/fleet click-and-drag interaction later -- rotate
+  // moves to the middle button, and right-drag pans (screenSpacePanning
+  // false keeps that pan flat on the ground plane, the same math the
+  // arrow keys use in panCamera() below, rather than tilting with the
+  // camera).
+  controls.screenSpacePanning = false;
+  controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+  canvas.addEventListener("contextmenu", ev => ev.preventDefault());
 
   const renderFrame = () => {
     // CSS2DRenderer sets element.style.display itself from each object's
