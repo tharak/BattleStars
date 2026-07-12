@@ -103,7 +103,10 @@ const MOONS = {
   jupiter: ["Io", "Europa", "Ganymede", "Callisto"],
   saturn:  ["Titan", "Rhea", "Iapetus", "Dione", "Tethys"],
   uranus:  ["Titania", "Oberon", "Miranda", "Ariel", "Umbriel"],
-  neptune: ["Triton"],
+  neptune: [
+    "Naiad", "Thalassa", "Despina", "Galatea", "Larissa", "Hippocamp", "Proteus",
+    "Triton", "Nereid", "Halimede", "Sao", "Laomedeia", "Psamathe", "Neso",
+  ],
 };
 
 // Real orbital distance from the parent, in parent-radii (semi-major axis
@@ -115,7 +118,9 @@ const MOON_DISTANCE_RATIO = {
   io: 6.03, europa: 9.6, ganymede: 15.3, callisto: 26.9,
   titan: 20.98, rhea: 9.05, iapetus: 61.15, dione: 6.48, tethys: 5.06,
   titania: 17.2, oberon: 23.0, miranda: 5.12, ariel: 7.53, umbriel: 10.49,
-  triton: 14.4,
+  naiad: 1.96, thalassa: 2.03, despina: 2.13, galatea: 2.52, larissa: 2.99,
+  hippocamp: 4.28, proteus: 4.78, triton: 14.4, nereid: 223.97,
+  halimede: 674.7, sao: 918.7, laomedeia: 959.0, psamathe: 1896.6, neso: 1965.3,
 };
 // Log-compressed so the ~22x real spread (Phobos to Iapetus) becomes a
 // manageable ~2-5 hex gap while still ordering/spacing moons the same way
