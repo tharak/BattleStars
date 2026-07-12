@@ -89,6 +89,11 @@ export function universeLevel() {
   };
 }
 
+// The System map is the merged Star+Body view: every planet carries its own
+// moons nested alongside it (moonsOf's own per-planet moon list, reused
+// as-is), so zooming the camera in on a planet is what reveals them --
+// there's no separate screen to navigate to anymore (see map/orbitmap.js's
+// layoutSystemWithMoons for how a moon's position nests inside its planet's).
 export function systemLevel(systemId) {
   const def = SYSTEMS_DEF[systemId];
   const bodies = def.planets.map(p => {
@@ -97,12 +102,13 @@ export function systemLevel(systemId) {
         id: p.id, label: p.label, kind: "belt", radiusKm: 0,
         distanceKm: BELT_AXIS_AU * AU_KM,
         orbit: { refAngleDeg: hashAngleDeg(p.id), refEpochMs: J2000_MS, periodDays: 365.25636 * BELT_AXIS_AU ** 1.5 },
+        moons: [],
       };
     }
     return {
       id: p.id, label: p.label, kind: "planet", radiusKm: BODY_RADIUS_KM[p.id],
       distanceKm: PLANET_AXIS_AU[p.id] * AU_KM, orbit: planetOrbit(p.id),
-      enter: { level: "body", systemId, bodyId: p.id },
+      moons: moonsOf(p.id),
     };
   });
   return { title: def.title, center: { ...def.star, radiusKm: BODY_RADIUS_KM[def.star.id] }, bodies };
@@ -249,21 +255,13 @@ function moonOrbit(id, parentId, distanceKm) {
   return { refAngleDeg: hashAngleDeg(id), refEpochMs: J2000_MS, periodDays };
 }
 
-export function bodyLevel(systemId, bodyId) {
-  const label = bodyLabel(systemId, bodyId);
+function moonsOf(bodyId) {
   const parentRadiusKm = BODY_RADIUS_KM[bodyId] || 0;
-  const moonNames = MOONS[bodyId] || [];
-  const bodies = moonNames.map(name => {
+  return (MOONS[bodyId] || []).map(name => {
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, "");
     const distanceKm = (MOON_DISTANCE_RATIO[id] || 10) * parentRadiusKm;
     return { id, label: name, kind: "moon", radiusKm: moonRadiusKm(id), distanceKm, orbit: moonOrbit(id, bodyId, distanceKm) };
   });
-  return { title: label, center: { id: bodyId, label, kind: "body-center", radiusKm: parentRadiusKm }, bodies };
-}
-
-function bodyLabel(systemId, bodyId) {
-  const p = SYSTEMS_DEF[systemId].planets.find(x => x.id === bodyId);
-  return p ? p.label : bodyId;
 }
 
 // ---------------------------------------------------------------------

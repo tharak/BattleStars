@@ -74,6 +74,62 @@ export function drawOrbitalBoard(ctx, layout, { colorsFor, isSelected, labelMinP
   for (const b of layout.placed) drawLabel(b);
 }
 
+// The merged System+Body view: every planet's moons nest inside it, placed
+// with their own small local scale (own distance/size range, not the
+// system's) and offset onto the planet's own world position -- so at
+// zoom 1 a moon cluster collapses to a few pixels around its planet
+// (correctly, since real moon-to-planet distances are tiny next to
+// planet-to-sun distances), and camera zoom (see worldToScreen below)
+// is what reveals it, the same way zooming a map reveals street detail.
+export function layoutSystemWithMoons(data, { maxPixel = 420, localMaxPixel = 22, nowMs = Date.now() } = {}) {
+  const centerRadiusKm = data.center?.radiusKm || 0;
+  const maxDistanceKm = Math.max(1, ...data.bodies.map(b => b.distanceKm));
+  const dist = makeDistanceScale(maxDistanceKm, maxPixel, Math.max(1, centerRadiusKm));
+  const maxRadiusKm = Math.max(centerRadiusKm, 1, ...data.bodies.map(b => b.radiusKm || 0));
+  const size = makeSizeScale(maxRadiusKm);
+
+  const planets = data.bodies.map(b => {
+    const angleDeg = b.orbit ? angleAtDeg(nowMs, b.orbit) : 0;
+    const rad = angleDeg * Math.PI / 180;
+    const r = dist.toPixel(b.distanceKm);
+    const x = r * Math.cos(rad), y = r * Math.sin(rad);
+    const rPx = size(b.radiusKm || 0);
+
+    const moons = b.moons || [];
+    let placedMoons = [];
+    if (moons.length) {
+      const localMaxDistanceKm = Math.max(1, ...moons.map(m => m.distanceKm));
+      const localDist = makeDistanceScale(localMaxDistanceKm, localMaxPixel, Math.max(1, b.radiusKm || 1));
+      const localMaxRadiusKm = Math.max(b.radiusKm || 1, 1, ...moons.map(m => m.radiusKm || 0));
+      const localSize = makeSizeScale(localMaxRadiusKm, { min: 0.6, max: 6 });
+      placedMoons = moons.map(m => {
+        const mAngleDeg = m.orbit ? angleAtDeg(nowMs, m.orbit) : 0;
+        const mRad = mAngleDeg * Math.PI / 180;
+        const lr = localDist.toPixel(m.distanceKm);
+        return {
+          ...m, x: x + lr * Math.cos(mRad), y: y + lr * Math.sin(mRad),
+          rPx: localSize(m.radiusKm || 0), angleDeg: mAngleDeg,
+          parentId: b.id, parentLabel: b.label, localRingPx: lr,
+        };
+      });
+    }
+    return { ...b, x, y, rPx, angleDeg, moons: placedMoons };
+  });
+
+  const center = data.center ? { ...data.center, x: 0, y: 0, rPx: size(centerRadiusKm) } : null;
+  return { center, planets, dist, size };
+}
+
+// The camera is a pan (x,y, in the same world-px units layoutOrbitalBoard/
+// layoutSystemWithMoons use) plus a zoom multiplier -- screen coordinates
+// are canvas-center-relative, same convention as everything else here.
+export function worldToScreen(camera, x, y) {
+  return [(x - camera.x) * camera.zoom, (y - camera.y) * camera.zoom];
+}
+export function screenToWorld(camera, sx, sy) {
+  return [camera.x + sx / camera.zoom, camera.y + sy / camera.zoom];
+}
+
 // Nearest body (real or extra, e.g. a fleet marker) within its own click
 // radius -- or a minimum tap target, since some real bodies render smaller
 // than a comfortable click target -- of (x,y). Null if nothing's close

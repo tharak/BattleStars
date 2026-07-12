@@ -1,7 +1,10 @@
 import { makeHexGrid } from "./hexgrid.js";
-import { layoutOrbitalBoard, drawOrbitalBoard, hitTest, pixelToKm } from "./orbitmap.js";
 import {
-  universeLevel, systemLevel, bodyLevel, formationBoard,
+  layoutOrbitalBoard, drawOrbitalBoard, hitTest, pixelToKm,
+  layoutSystemWithMoons, worldToScreen, screenToWorld,
+} from "./orbitmap.js";
+import {
+  universeLevel, systemLevel, formationBoard,
   FLEET_FORMATIONS, FORMATION_NAMES, FACTIONS, SHIPS_PER_FACTION,
   FLEET_POSITIONS, initFleetPositions, moveFleet,
 } from "./levels.js";
@@ -21,7 +24,10 @@ const battleControls = document.getElementById("battleControls");
 const battleBtn = document.getElementById("battleBtn");
 
 // Navigation stack: [{level:"universe"}, {level:"system",systemId},
-// {level:"body",systemId,bodyId}, {level:"formation",faction,formationName}]
+// {level:"formation",faction,formationName}]. The System map is the merged
+// Star+Body view -- there's no separate "body" level anymore; zooming the
+// camera in on a planet (wheel / -/= keys, or clicking it) is what reveals
+// its moons, instead of navigating to a new screen.
 let path = [{ level: "universe", label: "Universe" }];
 
 // Fleets only render/move at the System level -- this is which one (if
@@ -33,7 +39,6 @@ initFleetPositions();
 function levelData(entry) {
   if (entry.level === "universe") return universeLevel();
   if (entry.level === "system") return systemLevel(entry.systemId);
-  if (entry.level === "body") return bodyLevel(entry.systemId, entry.bodyId);
   return formationBoard(entry.faction, entry.formationName);
 }
 
@@ -48,9 +53,9 @@ const STROKE = {
 
 // Per-planet colors (loosely evocative of the real thing) override the
 // generic "planet"/"body-center" kind colors above -- Jupiter still reads
-// as Jupiter whether it's a dot on the System map or the centerpiece of
-// its own Body view. Merged with MOON_COLORS below into one id-keyed table
-// (ID_COLORS) since both are looked up the same way, by cell.id.
+// as Jupiter whether it's zoomed all the way out or you've zoomed in on it.
+// Merged with MOON_COLORS below into one id-keyed table (ID_COLORS) since
+// both are looked up the same way, by cell.id.
 const PLANET_COLORS = {
   mercury: { fill: "#3a3a3a", stroke: "#9e9e9e" },
   venus:   { fill: "#5c5030", stroke: "#f0d9a0" },
@@ -62,13 +67,13 @@ const PLANET_COLORS = {
   neptune: { fill: "#1a2a5c", stroke: "#5a7dff" },
 };
 
-// Same idea, per moon (id = its name lowercased -- see bodyLevel in
-// levels.js). Most moons don't have a strongly "iconic" real color the way
-// planets do, so these are mainly picked to stay distinguishable from each
-// other and from their parent planet's own color, with a nod to the few
-// that do have a real look (sulfurous Io, hazy orange Titan, etc). Only
-// the well-known moons get an entry -- everyone else falls back to the
-// generic "moon" kind color.
+// Same idea, per moon (id = its name lowercased -- see MOONS in levels.js).
+// Most moons don't have a strongly "iconic" real color the way planets do,
+// so these are mainly picked to stay distinguishable from each other and
+// from their parent planet's own color, with a nod to the few that do have
+// a real look (sulfurous Io, hazy orange Titan, etc). Only the well-known
+// moons get an entry -- everyone else falls back to the generic "moon"
+// kind color.
 const MOON_COLORS = {
   moon:     { fill: "#4a4a4a", stroke: "#c8c8c8" },
   phobos:   { fill: "#4a3a2a", stroke: "#c9a678" },
@@ -107,23 +112,74 @@ function colorsFor(cell) {
 }
 
 // ---------------------------------------------------------------------
-// Universe / System / Body: the real (to-scale, log-compressed) orbital
-// view -- see map/orbits.js and map/orbitmap.js.
+// Universe: just Sol, alone -- see map/orbits.js and map/orbitmap.js.
 // ---------------------------------------------------------------------
 
 const ORBIT_MAX_PX = 420;
 const ORBIT_MARGIN = 55;
-// How close (in on-screen pixels) two different factions' fleets need to
-// be, in the System view, before a Battle becomes possible.
+const CANVAS_PX = ORBIT_MAX_PX * 2 + ORBIT_MARGIN * 2;
+
+function renderUniverse(entry, data) {
+  canvas.width = CANVAS_PX;
+  canvas.height = CANVAS_PX;
+  const ctx = canvas.getContext("2d");
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+
+  const layout = layoutOrbitalBoard(data, { maxPixel: ORBIT_MAX_PX });
+  ctx.fillStyle = BOARD_TINT.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(cx, cy);
+  drawOrbitalBoard(ctx, layout, { colorsFor });
+  ctx.restore();
+
+  canvas.onclick = ev => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
+    const hitBody = hitTest(layout, x, y);
+    if (!hitBody) { setHint("Empty space — nothing here."); return; }
+    if (hitBody.enter) { zoomIn(hitBody.enter, hitBody.label); return; }
+    setHint(`${hitBody.label} — nothing to zoom into yet.`);
+  };
+  canvas.onwheel = null;
+
+  battleControls.style.display = "none";
+  renderFormationControls(entry);
+  renderBreadcrumb();
+}
+
+// ---------------------------------------------------------------------
+// System: the merged Star+Body view. Planets sit at their real (log-
+// compressed) distance from the Sun; each planet's own moons nest inside
+// it at their own small local scale (see layoutSystemWithMoons in
+// orbitmap.js) -- invisible at the default zoom, the way real moons
+// really are lost next to planet-to-sun distances, and revealed by
+// zooming the camera in (wheel, -/= keys, or clicking a planet to focus
+// on it). Fleets are drawn on top, independent of the orbital layout,
+// since they're player-movable rather than real orbiting bodies.
+// ---------------------------------------------------------------------
+
+const LOCAL_MAX_PX = 22;
+const MIN_ZOOM = 1, MAX_ZOOM = 60;
+const FOCUS_ZOOM = 20;
+const WHEEL_SENSITIVITY = 0.0015;
+const KEY_ZOOM_FACTOR = 1.3;
+// How close (in on-screen pixels, at the System view's base zoom -- fixed
+// regardless of the camera's current zoom, so the Battle button doesn't
+// flicker on/off just because you scrolled) two different factions' fleets
+// need to be before a Battle becomes possible.
 const BATTLE_PROXIMITY_PX = 40;
+
+// Persists across visits to the System view (e.g. going to Formation Setup
+// and back) so you don't lose your spot -- reset only by explicitly
+// clicking the Sun.
+const camera = { x: 0, y: 0, zoom: 1 };
+const clampZoom = z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 
 // A fleet's pixel position uses the exact same log-distance scale as every
 // real body in this view, so "close" on screen means close in the system,
-// consistently regardless of which two planets are involved. Fleets only
-// ever render at the System level -- Universe has no fleets to show, and a
-// Body view's moons are a different (smaller) coordinate space entirely.
-function placeFleets(entry, layout) {
-  if (entry.level !== "system") return [];
+// consistently regardless of which two planets are involved.
+function placeFleets(layout) {
   return Object.entries(FLEET_POSITIONS).map(([faction, pos]) => {
     const distanceKm = Math.hypot(pos.xKm, pos.yKm);
     const angle = Math.atan2(pos.yKm, pos.xKm);
@@ -145,47 +201,71 @@ function closeEnoughForBattle(fleets) {
   return false;
 }
 
-function renderOrbital(entry, data) {
-  canvas.width = ORBIT_MAX_PX * 2 + ORBIT_MARGIN * 2;
-  canvas.height = ORBIT_MAX_PX * 2 + ORBIT_MARGIN * 2;
+function renderSystem(entry, data) {
+  canvas.width = CANVAS_PX;
+  canvas.height = CANVAS_PX;
   const ctx = canvas.getContext("2d");
   const cx = canvas.width / 2, cy = canvas.height / 2;
 
-  const layout = layoutOrbitalBoard(data, { maxPixel: ORBIT_MAX_PX });
-  const fleets = placeFleets(entry, layout);
-  const battleReady = entry.level === "system" && closeEnoughForBattle(fleets);
+  const layout = layoutSystemWithMoons(data, { maxPixel: ORBIT_MAX_PX, localMaxPixel: LOCAL_MAX_PX });
+  const fleets = placeFleets(layout);
+  const battleReady = closeEnoughForBattle(fleets);
 
   ctx.fillStyle = BOARD_TINT.bg;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(cx, cy);
-  drawOrbitalBoard(ctx, layout, {
-    colorsFor,
-    isSelected: b => b.kind === "fleet" && b.faction === selectedFleet,
-    labelMinPx: data.bodies.length > 40 ? 5 : 0,
-  });
-  // Fleets aren't part of layout.placed (they're player-movable, not a
-  // real orbiting body), so they're drawn as their own extra dots on top.
-  for (const f of fleets) {
+
+  const drawRing = (ringCx, ringCy, worldRadiusPx) => {
+    const r = worldRadiusPx * camera.zoom;
+    if (r < 1) return;
     ctx.beginPath();
-    ctx.arc(f.x, f.y, f.rPx, 0, Math.PI * 2);
-    ctx.fillStyle = colorsFor(f).fill;
-    ctx.fill();
-    ctx.lineWidth = f.faction === selectedFleet ? 3 : 2;
-    ctx.strokeStyle = f.faction === selectedFleet ? "#ffffff" : colorsFor(f).stroke;
+    ctx.arc(ringCx, ringCy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "#1d243855";
+    ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.font = "bold 11px system-ui";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#d7deef";
-    ctx.fillText(f.label, f.x, f.y + f.rPx + 13);
+  };
+  const drawDot = (body, selected) => {
+    const [sx, sy] = worldToScreen(camera, body.x, body.y);
+    const rPx = Math.min(Math.max(body.rPx * camera.zoom, 1.2), 46);
+    const colors = colorsFor(body);
+    ctx.beginPath();
+    ctx.arc(sx, sy, rPx, 0, Math.PI * 2);
+    ctx.fillStyle = colors.fill;
+    ctx.fill();
+    ctx.lineWidth = selected ? 3 : 2;
+    ctx.strokeStyle = selected ? "#ffffff" : colors.stroke;
+    ctx.stroke();
+    if (rPx > 3) {
+      ctx.font = "bold 11px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#d7deef";
+      ctx.fillText(body.label, sx, sy + rPx + 13);
+    }
+    return [sx, sy, rPx];
+  };
+
+  if (layout.center) drawDot(layout.center, false);
+  for (const p of layout.planets) {
+    drawRing(...worldToScreen(camera, 0, 0), Math.hypot(p.x, p.y));
+    const [px, py] = drawDot(p, false);
+    for (const m of p.moons) {
+      drawRing(px, py, m.localRingPx);
+      drawDot(m, false);
+    }
   }
+  for (const f of fleets) drawDot(f, f.faction === selectedFleet);
   ctx.restore();
 
   canvas.onclick = ev => {
     const rect = canvas.getBoundingClientRect();
     const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
-    const hitFleet = fleets.find(f => Math.hypot(x - f.x, y - f.y) <= Math.max(f.rPx, 10));
 
+    const screenPos = b => worldToScreen(camera, b.x, b.y);
+    const screenR = b => Math.min(Math.max(b.rPx * camera.zoom, 1.2), 46);
+    const within = b => { const [sx, sy] = screenPos(b); return Math.hypot(x - sx, y - sy) <= Math.max(screenR(b), 10); };
+
+    const hitFleet = fleets.find(within);
     if (hitFleet) {
       if (selectedFleet === hitFleet.faction) {
         selectedFleet = null;
@@ -202,7 +282,8 @@ function renderOrbital(entry, data) {
     }
 
     if (selectedFleet) {
-      const [xKm, yKm] = pixelToKm(layout, x, y);
+      const [wx, wy] = screenToWorld(camera, x, y);
+      const [xKm, yKm] = pixelToKm(layout, wx, wy);
       moveFleet(selectedFleet, xKm, yKm);
       setHint(`${FACTIONS[selectedFleet].label} fleet moved.`);
       selectedFleet = null;
@@ -210,10 +291,35 @@ function renderOrbital(entry, data) {
       return;
     }
 
-    const hitBody = hitTest(layout, x, y);
-    if (!hitBody) { setHint("Empty space — nothing here."); return; }
-    if (hitBody.enter) { zoomIn(hitBody.enter, hitBody.label); return; }
-    setHint(hitBody.kind === "belt" ? "Asteroid Belt — no bodies to explore." : `${hitBody.label} — nothing to zoom into yet.`);
+    if (layout.center && within(layout.center)) {
+      camera.x = 0; camera.y = 0; camera.zoom = 1;
+      setHint("");
+      render();
+      return;
+    }
+    const hitMoon = layout.planets.flatMap(p => p.moons).find(within);
+    if (hitMoon) { setHint(`${hitMoon.label} — a moon of ${hitMoon.parentLabel}.`); return; }
+    const hitPlanet = layout.planets.find(within);
+    if (hitPlanet) {
+      camera.x = hitPlanet.x; camera.y = hitPlanet.y;
+      camera.zoom = clampZoom(Math.max(camera.zoom, FOCUS_ZOOM));
+      setHint(hitPlanet.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
+      render();
+      return;
+    }
+    setHint("Empty space — nothing here.");
+  };
+
+  canvas.onwheel = ev => {
+    ev.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
+    const [wx, wy] = screenToWorld(camera, x, y);
+    camera.zoom = clampZoom(camera.zoom * Math.exp(-ev.deltaY * WHEEL_SENSITIVITY));
+    // Keep the point under the cursor fixed on screen while zooming.
+    camera.x = wx - x / camera.zoom;
+    camera.y = wy - y / camera.zoom;
+    render();
   };
 
   battleControls.style.display = battleReady ? "flex" : "none";
@@ -221,6 +327,11 @@ function renderOrbital(entry, data) {
 
   renderFormationControls(entry);
   renderBreadcrumb();
+}
+
+function zoomSystemByKey(factor) {
+  camera.zoom = clampZoom(camera.zoom * factor);
+  render();
 }
 
 // ---------------------------------------------------------------------
@@ -275,6 +386,7 @@ function renderHex(entry, data) {
     if (!cell) { setHint("Empty space — nothing here."); return; }
     setHint(cell.isFlag ? "Flagship" : `Ship ${cell.label}`);
   };
+  canvas.onwheel = null;
 
   battleControls.style.display = "none";
   renderFormationControls(entry);
@@ -285,7 +397,8 @@ function render() {
   const entry = path[path.length - 1];
   const data = levelData(entry);
   if (entry.level === "formation") renderHex(entry, data);
-  else renderOrbital(entry, data);
+  else if (entry.level === "system") renderSystem(entry, data);
+  else renderUniverse(entry, data);
 }
 
 // The Formation Setup screen's controls (pick a formation, save it) live
@@ -342,6 +455,11 @@ function renderBreadcrumb() {
 }
 
 zoomOutBtn.onclick = zoomOut;
-document.addEventListener("keydown", ev => { if (ev.key === "Escape") zoomOut(); });
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") { zoomOut(); return; }
+  if (path[path.length - 1].level !== "system") return;
+  if (ev.key === "=" || ev.key === "+") { zoomSystemByKey(KEY_ZOOM_FACTOR); }
+  else if (ev.key === "-" || ev.key === "_") { zoomSystemByKey(1 / KEY_ZOOM_FACTOR); }
+});
 
 render();
