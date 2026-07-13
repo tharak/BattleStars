@@ -27,6 +27,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+// Plain THREE.Line/LineBasicMaterial can't actually get thicker than 1px in
+// WebGL -- gl.lineWidth is capped at 1 on effectively every modern browser/
+// GPU combination regardless of what's requested, a longstanding WebGL
+// limitation, not a Three.js bug. Fat-line rendering (real screen-space
+// pixel width) needs this "2" family of addons instead, which builds each
+// segment as a camera-facing quad rather than relying on native GL lines.
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
 // Matches battle/colors.js's BOARD_TINT.gridCell -- the tone that actually
 // covers most of the battle board (its hexes are filled with this, not
@@ -261,12 +270,18 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
   function addSpacetimeGrid({ size, divisions, wells }) {
     const half = size / 2;
     const step = size / divisions;
+    // falloff (how far the dip reaches) scales with the body's own radius
+    // but tightly -- the earlier 6x-radius falloff made the Sun's well
+    // ~200 units wide, wider than the gap to its nearest neighbor, so it
+    // read as one gentle citywide tilt instead of a crater around any one
+    // body. A ~2.5x-radius falloff keeps each well a legible, localized
+    // funnel instead of a slope you can't see the edge of.
     const depthAt = (x, z) => {
       let y = 0;
       for (const w of wells) {
         const dx = x - w.x, dz = z - w.z;
-        const falloff = Math.max(w.rPx * 6, 40);
-        const strength = w.rPx * 1.8;
+        const falloff = Math.max(w.rPx * 2.5, 25);
+        const strength = w.rPx * 3.2;
         y -= strength / (1 + (dx * dx + dz * dz) / (falloff * falloff));
       }
       return y;
@@ -281,16 +296,25 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
       }
       rows.push(row);
     }
-    const pts = [];
+    const flat = [];
     for (let i = 0; i <= divisions; i++) {
       for (let j = 0; j <= divisions; j++) {
-        if (j < divisions) pts.push(rows[i][j], rows[i][j + 1]);
-        if (i < divisions) pts.push(rows[i][j], rows[i + 1][j]);
+        if (j < divisions) { flat.push(...rows[i][j], ...rows[i][j + 1]); }
+        if (i < divisions) { flat.push(...rows[i][j], ...rows[i + 1][j]); }
       }
     }
-    const geo = new THREE.BufferGeometry().setFromPoints(pts);
-    const mat = new THREE.LineBasicMaterial({ color: GRID_COLOR, transparent: true, opacity: 0.45 });
-    objectGroup.add(new THREE.LineSegments(geo, mat));
+    const geo = new LineSegmentsGeometry();
+    geo.setPositions(flat);
+    // linewidth is in screen pixels (worldUnits defaults to false), so the
+    // grid stays a constant, clearly-visible thickness at any zoom level --
+    // resolution has to be supplied in pixels for that math to work, since
+    // this is a fake "line" built from camera-facing quads, not a real GL
+    // line primitive.
+    const mat = new LineMaterial({
+      color: GRID_COLOR, linewidth: 2, resolution: new THREE.Vector2(sizePx, sizePx),
+      transparent: true, opacity: 0.6,
+    });
+    objectGroup.add(new LineSegments2(geo, mat));
   }
 
   function rebuild(fn) {

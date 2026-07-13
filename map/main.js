@@ -201,8 +201,12 @@ const BELT_HEIGHT_PX = 5;
 // The "rubber sheet" spacetime grid drawn across the System view (see
 // addSpacetimeGrid in scene3d.js) -- world-unit cell size and how far past
 // the outermost body (Neptune, at ORBIT_MAX_PX) it extends, shared by the
-// 3D and 2D paths so both cover the same area at the same density.
-const GRID_CELL_PX = 30;
+// 3D and 2D paths so both cover the same area at the same density. 20px
+// cells (rather than the wider 30px first tried) so a gravity well's dip,
+// whose falloff radius can be as tight as ~25 world units for a small
+// planet, still gets a few grid points across it instead of being too
+// coarse to read as a curve.
+const GRID_CELL_PX = 20;
 const GRID_EXTENT_PX = ORBIT_MAX_PX + 80;
 
 // A fleet's world position uses the exact same log-distance scale as every
@@ -448,7 +452,7 @@ function renderSystem2D(entry, data) {
   // this is just the same-spaced lines, undipped, echoing the battle
   // board's own hex grid.
   ctx.strokeStyle = BOARD_TINT.gridLine;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1.5;
   ctx.globalAlpha = 0.6;
   for (let x = -GRID_EXTENT_PX; x <= GRID_EXTENT_PX; x += GRID_CELL_PX) {
     const [x1, y1] = worldToScreen(camera2d, x, -GRID_EXTENT_PX);
