@@ -10,7 +10,6 @@
 // the universe so far, and only "well-known" moons (the ones with a common
 // name) are modeled, not every rock ever catalogued.
 
-export { FORMATION_NAMES } from "../battle/config.js";
 import {
   AU_KM, BODY_RADIUS_KM, MAJOR_MOON_RADIUS_KM, PARENT_GM_KM3S2,
   keplerPeriodDays, angleAtDeg, J2000_MS, hashAngleDeg,
@@ -269,11 +268,12 @@ function moonsOf(bodyId) {
 }
 
 // ---------------------------------------------------------------------
-// Fleets: each faction's real position in the Sol system (Sun-centered
-// xKm,yKm), movable by the player -- in-memory only, like FLEET_FORMATIONS
-// below (resets on reload). Rendered at the System level, near whichever
-// planet they're currently at; a Battle is triggered from there once two
-// different factions' fleets are close enough (see map/main.js).
+// Fleets: each faction's real starting position in the Sol system (Sun-
+// centered xKm,yKm) and starting formation -- used exactly once, to spawn
+// each faction's 12 ships into map/shipCombat.js's persistent World (see
+// map/main.js:spawnInitialShips). From that point on a ship's real
+// Position/Facing components are the only source of truth for where it
+// is; these two exports are never read again afterward.
 // ---------------------------------------------------------------------
 
 export const FACTIONS = {
@@ -297,12 +297,6 @@ export function initFleetPositions(nowMs = Date.now()) {
     FLEET_POSITIONS[faction] = { xKm: distanceKm * Math.cos(rad), yKm: distanceKm * Math.sin(rad) };
   }
 }
-export function moveFleet(faction, xKm, yKm) {
-  FLEET_POSITIONS[faction] = { xKm, yKm };
-}
 
-// Each faction's chosen formation, in memory only (resets on reload) --
-// set directly from the System map's info panel (main.js), read again
-// once a battle actually triggers so deployment isn't just random. "line"
-// until chosen.
+// Each faction's starting formation, in memory only (resets on reload).
 export const FLEET_FORMATIONS = { blue: "line", green: "line", red: "line" };

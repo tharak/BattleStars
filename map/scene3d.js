@@ -316,6 +316,20 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     pickables.push(hit);
   }
 
+  // A shot's tracer: one straight line between firer and target, added
+  // fresh every rebuild() the same as everything else here -- since
+  // clearObjects() wipes the whole scene at the start of every render (see
+  // rebuild below), a tracer simply not being re-added on the next render
+  // IS it disappearing after one frame, no separate cleanup/timer needed.
+  function addTracer({ from, to, hit }) {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(from[0], SHIP_BASE_Y + 0.1, from[1]),
+      new THREE.Vector3(to[0], SHIP_BASE_Y + 0.1, to[1]),
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color: hit ? 0xff3355 : 0x8899aa, transparent: true, opacity: 0.9 });
+    objectGroup.add(new THREE.Line(geo, mat));
+  }
+
   // The "rubber sheet" spacetime grid: a flat reference grid across the
   // ecliptic plane whose cells compress and converge near each massive
   // body -- the "space itself curves near mass" picture -- rather than
@@ -348,7 +362,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
 
   function rebuild(fn) {
     clearObjects();
-    fn({ addBody, addRing, addShip, addAsteroidBelt, addSpacetimeGrid });
+    fn({ addBody, addRing, addShip, addAsteroidBelt, addSpacetimeGrid, addTracer });
     renderFrame();
   }
 

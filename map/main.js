@@ -1,26 +1,20 @@
 import {
-  layoutOrbitalBoard, drawOrbitalBoard, hitTest, pixelToKm,
+  layoutOrbitalBoard, drawOrbitalBoard, hitTest,
   layoutSystemWithMoons, worldToScreen, screenToWorld,
 } from "./orbitmap.js";
 import { createSystemScene } from "./scene3d.js";
 import { AU_KM, beltParticles } from "./orbits.js";
 import {
   universeLevel, systemLevel,
-  FLEET_FORMATIONS, FORMATION_NAMES, FACTIONS, SHIPS_PER_FACTION,
-  FLEET_POSITIONS, initFleetPositions, moveFleet,
+  FLEET_FORMATIONS, FACTIONS, SHIPS_PER_FACTION,
+  FLEET_POSITIONS, initFleetPositions,
 } from "./levels.js";
 import { DIR_ANGLE, hexEdgeWidths, hexCorners } from "../battle/hexmath.js";
 import { formationLayout } from "../battle/formations.js";
 import { BOARD_TINT } from "../battle/colors.js";
-import { State as BattleState } from "../battle/state.js";
-import { newBattle } from "../battle/turnEngine.js";
-import { wire as wireBattle } from "../battle/input.js";
+import { MP_MAX, STATE_NAME } from "../battle/config.js";
+import * as SC from "./shipCombat.js";
 
-const capitalize = s => s[0].toUpperCase() + s.slice(1);
-
-// "starmapCv", not "cv" -- "cv" is claimed by the embedded battle board's
-// own canvas (battle/render.js grabs it by that exact id at import time;
-// see the battle-integration block near the top of this file).
 const canvas = document.getElementById("starmapCv");
 const mapwrap = document.getElementById("mapwrap");
 const canvas3d = document.getElementById("cv3d");
@@ -29,142 +23,65 @@ const topbar = document.getElementById("topbar");
 const breadcrumb = document.getElementById("breadcrumb");
 const zoomOutBtn = document.getElementById("zoomOut");
 const hint = document.getElementById("hint");
-const battleControls = document.getElementById("battleControls");
-const battleBtn = document.getElementById("battleBtn");
 const infoPanel = document.getElementById("infoPanel");
 const infoEmpty = document.getElementById("infoEmpty");
 const infoBody = document.getElementById("infoBody");
 const infoName = document.getElementById("infoName");
 const infoDetail = document.getElementById("infoDetail");
 const infoControls = document.getElementById("infoControls");
-const infoFormationButtons = document.getElementById("infoFormationButtons");
-const infoDeselectBtn = document.getElementById("infoDeselectBtn");
+const infoShipStatus = document.getElementById("infoShipStatus");
+const infoTurnL = document.getElementById("infoTurnL");
+const infoTurnR = document.getElementById("infoTurnR");
+const infoForward = document.getElementById("infoForward");
+const infoBack = document.getElementById("infoBack");
+const infoFire = document.getElementById("infoFire");
+const infoTravel = document.getElementById("infoTravel");
+const infoEnd = document.getElementById("infoEnd");
 const mapArea = document.getElementById("mapArea");
-const battleArea = document.getElementById("battleArea");
-const battleOverlay = document.getElementById("overlay");
-const battleMenuBtn = document.getElementById("btnMenu");
-const battleOverlayMenuBtn = document.getElementById("ovMenu");
-const battleStepBtn = document.getElementById("btnStep");
-const battleAutoBtn = document.getElementById("btnAuto");
-
-// The tactical battle, embedded straight into this page instead of a
-// window.location.href to battle.html -- see startMapBattle/exitMapBattle
-// below. battle/input.js's wire(state) binds every button/canvas/keydown
-// handler the engine needs by id (#cv, #btnL, #btnSetupFlag, ...), all of
-// which #battleArea's markup in map.html provides verbatim, so the whole
-// engine (battle/turnEngine.js, systems.js, render.js, panels.js,
-// deployment.js) runs completely unmodified here -- this file is the only
-// new code. wire() just assigns .onclick handlers, so calling it once at
-// load (rather than once per battle) is fine; State is the same mutable
-// singleton battle.html's own main.js would otherwise own.
-wireBattle(BattleState);
-// wire() points btnMenu/ovMenu at battle/input.js's own toMenu(), which
-// reaches for a #menu screen this page doesn't have (that's battle.html's
-// scenario picker, which this integration deliberately skips -- see
-// startMapBattle). Point them at the map instead.
-battleMenuBtn.onclick = exitMapBattle;
-battleOverlayMenuBtn.onclick = exitMapBattle;
-
-// Whichever two different-faction ships are nearest each other, if any
-// pair is within BATTLE_PROXIMITY_PX -- not just whether one exists,
-// since starting a battle now needs to know exactly which two factions
-// collided (a bare boolean was enough back when Battle just linked out to
-// battle.html's own scenario picker instead of using real fleet data).
-function nearbyBattlePair(ships) {
-  for (let i = 0; i < ships.length; i++) {
-    for (let j = i + 1; j < ships.length; j++) {
-      if (ships[i].faction === ships[j].faction) continue;
-      if (Math.hypot(ships[i].x - ships[j].x, ships[i].y - ships[j].y) <= BATTLE_PROXIMITY_PX) {
-        return [ships[i].faction, ships[j].faction];
-      }
-    }
-  }
-  return null;
-}
-// Shared by both renderSystem3D/2D's end-of-render Battle button wiring.
-function wireBattleButton(battlePair) {
-  battleControls.style.display = battlePair ? "flex" : "none";
-  battleBtn.onclick = battlePair ? () => startMapBattle(battlePair[0], battlePair[1]) : null;
-}
-
-// Builds a real scenario from the two actual colliding fleets -- their
-// real ship count (SHIPS_PER_FACTION, the same 12 every fleet on the map
-// always has) and whatever formation each side actually has set (the
-// info panel's own formation buttons) -- and jumps straight into combat
-// with it via deployMode 1 ("battle formation", see newBattle in
-// turnEngine.js), skipping manual deployment entirely: there's no
-// meaningful "place your own squadrons by hand" step here, since the
-// fleets' formations are already a real, already-visible thing on the
-// star map, not a fresh choice made at battle time.
-//
-// ctrlMode is fixed at 3 (spectate, AI vs AI) -- the star map has no
-// concept yet of "which faction is the player", so there's no side to
-// hand human control to. Both Blue/Red control-mode-1/2 keyboard+click
-// controls and Step/Auto stay fully available regardless -- this is a
-// scope choice (avoid inventing a player-identity concept that doesn't
-// exist anywhere else on the map yet), not a technical limitation.
-function startMapBattle(factionA, factionB) {
-  BattleState.scen = {
-    t: "Star Map Engagement",
-    n: `${FACTIONS[factionA].label} (${FLEET_FORMATIONS[factionA]}) vs ${FACTIONS[factionB].label} (${FLEET_FORMATIONS[factionB]})`,
-    a: FLEET_FORMATIONS[factionA], b: FLEET_FORMATIONS[factionB],
-  };
-  BattleState.ctrlMode = 3;
-  BattleState.SIZE = SHIPS_PER_FACTION;
-  BattleState.moveMode = 0;
-  BattleState.deployMode = 1;
-  battleStepBtn.style.display = "";
-  battleAutoBtn.style.display = "";
-  topbar.style.display = "none";
-  hint.style.display = "none";
-  battleControls.style.display = "none";
-  mapArea.style.display = "none";
-  battleArea.style.display = "block";
-  newBattle(BattleState);
-}
-// Leaves the battle and returns to wherever the star map already was
-// (render() redraws from the existing `path`/selectedFleet state, both
-// untouched by any of this -- a battle's outcome doesn't yet feed back
-// into the fleets' real positions/rosters; see the note in this
-// integration's commit message for that follow-up).
-function exitMapBattle() {
-  battleOverlay.style.display = "none";
-  if (BattleState.autoTimer) { clearInterval(BattleState.autoTimer); BattleState.autoTimer = null; }
-  BattleState.G = null; BattleState.act = null; BattleState.setup = null; BattleState.setupQueue = [];
-  battleArea.style.display = "none";
-  topbar.style.display = "flex";
-  mapArea.style.display = "inline-block";
-  render();
-}
 
 // Navigation stack: [{level:"universe"}, {level:"system",systemId}]. The
 // System map is the merged Star+Body view -- there's no separate "body"
 // level anymore; zooming the camera in on a planet (wheel / -/= keys, or
 // clicking it) is what reveals its moons, instead of navigating to a new
-// screen. Formation Setup used to be a third level here (a separate hex-
-// board screen) but isn't anymore -- picking a fleet's formation now
-// happens inline in the System level's info panel (see
-// renderFormationButtons), with no navigation at all.
+// screen.
 let path = [
   { level: "universe", label: "Universe" },
   { level: "system", systemId: "sol", label: "Sol" },
 ];
 
-// Fleets only render/move at the System level -- this is which one (if
-// any) is currently picked up, waiting for a destination click.
-let selectedFleet = null;
+// The one shared ECS world every ship on the map lives in (see
+// shipCombat.js) -- spawned once at startup (spawnInitialShips) from each
+// faction's formation, then persistent: a ship's position/facing/strength/
+// morale only change via player commands (turn/forward/back/fire/Set
+// Course) from here on, never recomputed from the formation again.
+const world = new SC.World();
+// Whichever single ship (an entity id, or null) is currently selected at
+// the System level, plus its in-progress activation -- mirrors
+// battle/state.js's `act` shape ({u,mp,moved,fired,fireMode,cmd}) but
+// owned here directly rather than through a shared battle State, since
+// there's no turn order to hand off to (see shipCombat.js's header for
+// why). travelArmed is Set-Course's own "next click is a destination"
+// flag, armed by the Travel button and consumed by the next click.
+let selectedShip = null;
+let activation = null;
+let travelArmed = false;
+// Fire's own transient shot-line records (shipCombat.js's fire() pushes
+// to this) -- read once by the renderer right after a fire command and
+// cleared immediately after, so a tracer shows for exactly one render,
+// not battle's own state.effects (this is the map's own, unrelated array).
+const effects = [];
 // The last body (star/planet/moon/belt) clicked at the System level, for
 // the info panel -- see infoFor/renderInfoPanel. Superseded by
-// selectedFleet whenever a fleet is picked up (checked first in
+// selectedShip whenever a ship is selected (checked first in
 // renderInfoPanel), so this only ever matters while nothing's selected.
 let lastClickedInfo = null;
 // Whatever's currently under the cursor at the System level (see
 // showHoverInfo) -- takes priority over lastClickedInfo but not over an
-// actively-selected fleet's own controls (checked first in
-// renderInfoPanel), so hovering some other body while mid-move doesn't
-// blow away the "click a destination" controls. hoverId is the last
-// hovered body/ship's own `.id` (stable per body -- see levels.js/
-// placeShips), used purely to skip re-rendering the panel on every single
+// actively-selected ship's own controls (checked first in
+// renderInfoPanel), so hovering some other body while mid-command doesn't
+// blow away the command panel. hoverId is the last hovered body/ship's
+// own `.id` (an entity id for ships, a string id for bodies -- either way
+// stable), used purely to skip re-rendering the panel on every single
 // mousemove pixel while still hovering the same thing.
 let hoverInfo = null;
 let hoverId = null;
@@ -175,7 +92,7 @@ initFleetPositions();
 // addShip in scene3d.js and drawDot/drawShip below) -- this panel is
 // where a click's result actually shows up instead. Read every time
 // through renderInfoPanel() rather than pushed reactively, so any click
-// handler can just update selectedFleet/lastClickedInfo and call it,
+// handler can just update selectedShip/lastClickedInfo and call it,
 // the same way setHint(...) already works.
 function infoFor(hit) {
   if (!hit) return null;
@@ -185,22 +102,22 @@ function infoFor(hit) {
   if (hit.kind === "planet") return { name: hit.label, detail: "Planet." };
   if (hit.kind === "ship") {
     return {
-      name: `${FACTIONS[hit.faction].label} Fleet`,
-      detail: hit.isFlag ? "Flagship." : `Ship ${hit.label} of ${SHIPS_PER_FACTION}.`,
+      name: `${SC.labelOf(world, hit.id)}${hit.isFlag ? " ★" : ""}`,
+      detail: `${FACTIONS[hit.faction].label} — Str ${SC.strengthOf(world, hit.id)}, ${STATE_NAME[SC.moraleOf(world, hit.id)]}.`,
     };
   }
   return null;
 }
 // Puts whatever was just clicked into the info panel. Shared by both the
 // 3D and 2D click handlers' star/moon/planet/belt branches -- each still
-// owns its own setHint(...) wording and camera-reset/focus call (those
-// genuinely differ per render path), but the panel update itself doesn't.
+// owns its own setHint(...) wording (that genuinely differs per render
+// path), but the panel update itself doesn't.
 function showBodyInfo(hit) {
   lastClickedInfo = infoFor(hit);
   renderInfoPanel();
 }
 // Live-updates the panel to whatever's under the cursor, without touching
-// lastClickedInfo/selectedFleet -- moving off every body reverts the panel
+// lastClickedInfo/selectedShip -- moving off every body reverts the panel
 // to whatever a click last put there (or the empty placeholder), the same
 // way a click's own result behaves once the cursor stops hovering anything.
 // Shared by both the 3D and 2D mousemove handlers.
@@ -211,55 +128,140 @@ function showHoverInfo(hit) {
   hoverInfo = infoFor(hit);
   renderInfoPanel();
 }
-// Selecting, deselecting, and moving a fleet do exactly the same thing
-// regardless of which render path's canvas the click came from -- only
-// how a click becomes "which ship" or "which world point" differs
-// between the two. Shared here so that logic exists once.
-function selectOrDeselectFleet(faction) {
-  if (selectedFleet === faction) {
-    selectedFleet = null;
-    setHint("");
-  } else {
-    selectedFleet = faction;
-    setHint(`${FACTIONS[faction].label} fleet selected — click a destination to move it, or click it again to deselect.`);
-  }
+// Selecting a ship resets its activation fresh (mirrors
+// battle/turnEngine.js:selectUnit) -- there's no "un-activated" gating
+// like battle's own selectUnit checks (Q.isActivated), since there's no
+// turn order here: any living ship, any faction, can be picked up at any
+// time (see shipCombat.js's header for why).
+function selectShip(e) {
+  selectedShip = e;
+  activation = { u: e, mp: MP_MAX, moved: false, fired: false, fireMode: false, cmd: SC.inCommand(world, e) };
+  travelArmed = false;
+  setHint(`${SC.labelOf(world, e)} selected.`);
   renderInfoPanel();
   render();
 }
-function moveSelectedFleetTo(xKm, yKm) {
-  moveFleet(selectedFleet, xKm, yKm);
-  setHint(`${FACTIONS[selectedFleet].label} fleet moved.`);
-  selectedFleet = null;
+// Deselects without touching the hint -- shared by endActivation (which
+// does want to clear it, an explicit "I'm done" action) and doFireAt's
+// own auto-end when firing out of command (which must NOT clear it, since
+// the hint at that point is the fire result doFireAt just set -- calling
+// the old endActivation from there clobbered that message with "" before
+// the player ever saw it).
+function clearSelection() {
+  selectedShip = null;
+  activation = null;
+  travelArmed = false;
+}
+// Mirrors battle/turnEngine.js:endActivation, but with no proceed(state)
+// hand-off to another unit/side -- there's nothing to hand off to.
+function endActivation() {
+  clearSelection();
+  setHint("");
   renderInfoPanel();
   render();
 }
-// Formation choice buttons are built fresh each call (not once at init)
-// since which one should show as "active" (the current FLEET_FORMATIONS
-// entry) changes with selectedFleet -- same reason renderFormationButtons'
-// predecessor (the old separate Formation Setup screen) rebuilt its own
-// button row on every render rather than once.
-function renderFormationButtons(faction) {
-  infoFormationButtons.innerHTML = "";
-  for (const name of FORMATION_NAMES) {
-    const btn = document.createElement("button");
-    btn.textContent = capitalize(name);
-    if (name === FLEET_FORMATIONS[faction]) btn.className = "primary";
-    btn.onclick = () => {
-      FLEET_FORMATIONS[faction] = name;
-      renderInfoPanel();
-      render();
-    };
-    infoFormationButtons.appendChild(btn);
+function doTurn(dir) {
+  if (!SC.canMove(activation)) return;
+  SC.turn(world, activation.u, dir);
+  activation.mp--; activation.moved = true; activation.fireMode = false;
+  setHint("");
+  renderInfoPanel();
+  render();
+}
+function moveResultHint(res) {
+  if (res.reason === "shaken") setHint("Shaken — refuses to close the distance.");
+  else if (res.reason === "blocked") setHint("Blocked — that hex is occupied.");
+}
+function doForward() {
+  if (!SC.canMove(activation)) return;
+  const res = SC.moveForward(world, activation.u);
+  if (!res.ok) { moveResultHint(res); renderInfoPanel(); return; }
+  activation.mp--; activation.moved = true; activation.fireMode = false;
+  setHint("");
+  renderInfoPanel();
+  render();
+}
+function doBackward() {
+  if (!SC.canBack(activation)) return;
+  const res = SC.moveBackward(world, activation.u);
+  if (!res.ok) { moveResultHint(res); renderInfoPanel(); return; }
+  activation.mp = 0; activation.moved = true; activation.fireMode = false;
+  setHint("");
+  renderInfoPanel();
+  render();
+}
+// Arms the cosmetic "fire mode" hint -- exactly like battle, clicking a
+// legal target fires regardless of whether this was pressed first (see
+// handleShipOrDestinationClick), so this only exists to show
+// "pick a highlighted target" in the panel.
+function armFireMode() {
+  if (!SC.canFire(world, activation)) return;
+  activation.fireMode = true;
+  renderInfoPanel();
+}
+function doFireAt(tgt) {
+  if (!SC.canFire(world, activation)) return;
+  if (!SC.legalTargets(world, activation.u).includes(tgt)) return;
+  const firer = activation.u;
+  const result = SC.fire(world, firer, tgt, effects);
+  activation.fired = true; activation.fireMode = false;
+  setHint(`${SC.labelOf(world, firer)} fires (${result.arc} arc, ${result.need}+): [${result.rolls.join(" ")}] → ` +
+    `${result.hits} hit${result.hits === 1 ? "" : "s"}${result.destroyed ? " — destroyed!" : ""}`);
+  if (!activation.cmd) { clearSelection(); renderInfoPanel(); render(); return; } // out of command: fire was the whole activation
+  renderInfoPanel();
+  render();
+}
+// Arms Set Course -- the next click anywhere (body, ship, or empty space)
+// becomes the selected ship's new position, an instant reposition with
+// none of moveForward/moveBackward's neighbor/occupancy/Shaken rules
+// (matching the old whole-fleet moveFleet's own instant-move semantics),
+// for real interplanetary distances the hex-by-hex MP budget can't cover.
+function armTravel() {
+  if (!activation) return;
+  travelArmed = true;
+  setHint("Click a destination to set course.");
+  renderInfoPanel();
+}
+function setCourse(x, y) {
+  const [c, r] = pixelToHexIndex(x, y);
+  SC.setPosition(world, activation.u, c, r);
+  setHint(`${SC.labelOf(world, activation.u)} course set.`);
+  travelArmed = false;
+  renderInfoPanel();
+  render();
+}
+// Shared by both the 3D and 2D click handlers: handles everything that
+// depends on a ship being selected (firing at a legal target, switching
+// selection to a different ship, selecting a fresh one, or consuming an
+// armed Set Course) before either handler falls through to its own
+// star/moon/planet/belt info-panel branches. Returns true if the click
+// was fully handled here.
+function handleShipOrDestinationClick(hit, worldPoint) {
+  if (activation && travelArmed && worldPoint) { setCourse(worldPoint[0], worldPoint[1]); return true; }
+  if (hit?.kind === "ship") {
+    if (activation && SC.legalTargets(world, activation.u).includes(hit.id)) { doFireAt(hit.id); return true; }
+    if (!activation || activation.u !== hit.id) selectShip(hit.id);
+    return true;
   }
+  return false;
 }
 function renderInfoPanel() {
-  if (selectedFleet) {
+  if (selectedShip != null && !SC.isAlive(world, selectedShip)) { selectedShip = null; activation = null; }
+  if (selectedShip != null) {
+    const u = selectedShip;
     infoEmpty.style.display = "none";
     infoBody.style.display = "block";
-    infoName.textContent = `${FACTIONS[selectedFleet].label} Fleet`;
-    infoDetail.textContent = `${SHIPS_PER_FACTION} ships. Click a destination to move it.`;
+    infoName.textContent = `${SC.labelOf(world, u)}${SC.isFlagship(world, u) ? " ★" : ""}`;
+    infoDetail.textContent = `${FACTIONS[SC.factionOf(world, u)].label} — Str ${SC.strengthOf(world, u)}, ${STATE_NAME[SC.moraleOf(world, u)]}`;
     infoControls.style.display = "flex";
-    renderFormationButtons(selectedFleet);
+    infoShipStatus.innerHTML =
+      `${activation.cmd ? "In command (move + fire)" : "Out of command (move OR fire)"}<br>` +
+      `MP ${activation.mp}/${MP_MAX}${activation.fired ? " · has fired" : ""}` +
+      (activation.fireMode ? `<br><span style="color:var(--red)">Pick a highlighted target.</span>` : "") +
+      (travelArmed ? `<br><span style="color:var(--red)">Click a destination.</span>` : "");
+    infoTurnL.disabled = infoTurnR.disabled = infoForward.disabled = !SC.canMove(activation);
+    infoBack.disabled = !SC.canBack(activation);
+    infoFire.disabled = !SC.canFire(world, activation);
     return;
   }
   const shown = hoverInfo || lastClickedInfo;
@@ -274,12 +276,13 @@ function renderInfoPanel() {
   infoEmpty.style.display = "block";
   infoBody.style.display = "none";
 }
-infoDeselectBtn.onclick = () => {
-  selectedFleet = null;
-  setHint("");
-  renderInfoPanel();
-  render();
-};
+infoTurnL.onclick = () => doTurn(1);
+infoTurnR.onclick = () => doTurn(-1);
+infoForward.onclick = doForward;
+infoBack.onclick = doBackward;
+infoFire.onclick = armFireMode;
+infoTravel.onclick = armTravel;
+infoEnd.onclick = endActivation;
 
 function levelData(entry) {
   return entry.level === "system" ? systemLevel(entry.systemId) : universeLevel();
@@ -363,13 +366,13 @@ const BODY_TEXTURES = {
 const textureFor = cell => BODY_TEXTURES[cell.id];
 
 // Faction fleet/ship colors (see FACTIONS in levels.js) -- checked via
-// cell.faction rather than cell.id, since fleet/ship ids are per-instance
-// (blue-ship-3, ...), not a shared small id space like planets/moons.
-// Neon rather than the muted tones everything else uses: each ship is
-// now a single small icon on its own hex cell (see placeShips), and a
-// small icon needs to read as a bright dot from across the whole system
-// at a glance, not blend into the rest of the palette the way a bigger
-// shape safely could.
+// cell.faction rather than cell.id, since a ship's id is its own ECS
+// entity number (see shipCombat.js), not a shared small id space like
+// planets/moons. Neon rather than the muted tones everything else uses:
+// each ship is a single small icon on its own hex cell (see
+// shipsSnapshot), and a small icon needs to read as a bright dot from
+// across the whole system at a glance, not blend into the rest of the
+// palette the way a bigger shape safely could.
 const FACTION_COLORS = {
   blue:  { fill: "#00e5ff", stroke: "#00e5ff" },
   green: { fill: "#00ffb3", stroke: "#00ffb3" },
@@ -418,7 +421,6 @@ function renderUniverse(entry, data) {
   canvas.oncontextmenu = null;
   canvas.style.cursor = "";
 
-  battleControls.style.display = "none";
   renderBreadcrumb();
 }
 
@@ -443,11 +445,6 @@ const LOCAL_MAX_PX = 22;
 const MIN_ZOOM = 1, MAX_ZOOM = 60;
 const KEY_ZOOM_FACTOR = 1.3;
 const KEY_PAN_PX = 60;
-// How close (in world units -- fixed regardless of the camera's current
-// zoom/angle, so the Battle button doesn't flicker on/off just because you
-// rotated or scrolled) two different factions' fleets need to be before a
-// Battle becomes possible.
-const BATTLE_PROXIMITY_PX = 40;
 // The asteroid belt is drawn as a scattered particle cloud (real distance
 // range, synthetic individual positions -- see beltParticles in orbits.js)
 // rather than the single dot every other body gets. BELT_HEIGHT_PX is how
@@ -489,49 +486,75 @@ function shipHexOffset(c, r) {
   return [(c + 0.5 * (r & 1)) * GRID_HEX_SIZE_PX * Math.sqrt(3), r * GRID_HEX_SIZE_PX * 1.5];
 }
 
-// The nearest actual grid-lattice vertex to an arbitrary continuous pixel
-// point. A fleet's anchor (its faction's real orbital position, converted
-// straight from km -- see placeShips) lands at an essentially arbitrary
-// pixel offset from the grid, the same "only the Sun is guaranteed to sit
-// on a lattice vertex" issue GRID_HEX_SIZE_PX's own comment describes for
-// planets. shipHexOffset's per-ship spacing is grid-exact by construction,
-// but adding it to an off-lattice anchor just carries that same
-// fractional remainder into every ship in the formation -- snapping the
-// anchor itself first is what actually puts the formation's hex cells on
-// the drawn grid, not merely spaced like it.
-function snapToHexGrid(x, y) {
+// The nearest actual grid-lattice INDEX (c,r), not pixel position, to an
+// arbitrary continuous pixel point -- the inverse of shipHexOffset. Used
+// both to convert a fleet's real orbital pixel anchor onto the lattice at
+// spawn time (see spawnInitialShips) and to turn a Set Course click's
+// world point into the real (c,r) a ship's Position component stores
+// (see setCourse) -- a ship's position is always an integer hex index
+// from here on, never a raw pixel value.
+function pixelToHexIndex(x, y) {
   const size = GRID_HEX_SIZE_PX;
   const r = Math.round(y / (size * 1.5));
   const c = Math.round(x / (size * Math.sqrt(3)) - 0.5 * (r & 1));
-  return shipHexOffset(c, r);
+  return [c, r];
+}
+function snapToHexGrid(x, y) {
+  return shipHexOffset(...pixelToHexIndex(x, y));
 }
 
-// Individual ship tokens, not one "12" blob per faction -- each ship sits
-// on its own hex cell (shipHexOffset), arranged in whatever formation
-// shape the faction has chosen in Formation Setup (the exact same
-// battle/formations.js layout the actual Battle board deploys), anchored
-// on the faction's single logical FLEET_POSITIONS point (the exact same
-// log-distance scale as every real body in this view, so "close" means
-// close in the system, consistently regardless of which two planets are
-// involved). Moving/selecting a fleet still operates on that one anchor
-// point -- clicking any of a faction's ships selects the whole group,
-// same as the old single-icon fleet marker did.
-function placeShips(layout) {
-  return Object.entries(FLEET_POSITIONS).flatMap(([faction, pos]) => {
+// One-time spawn into the shared `world` (see its declaration above) --
+// every faction's 12 ships, placed at their formation-derived starting
+// hex exactly like the old (now-removed) placeShips computed fresh on
+// every render, but done exactly once here: from this point on a ship's
+// real Position/Facing components are the only source of truth for where
+// it is and which way it faces, never recomputed from
+// FLEET_POSITIONS/FLEET_FORMATIONS again. Anchored on each faction's
+// single logical FLEET_POSITIONS point (the exact same log-distance scale
+// as every real body in this view) using the exact same
+// formationLayout()-relative-offset math the old placeShips used, so
+// every ship's starting position/formation shape is unchanged from before
+// this session's rewrite.
+let shipsSpawned = false;
+function spawnInitialShips(layout) {
+  for (const [faction, pos] of Object.entries(FLEET_POSITIONS)) {
     const distanceKm = Math.hypot(pos.xKm, pos.yKm);
     const angle = Math.atan2(pos.yKm, pos.xKm);
     const r = layout.dist.toPixel(distanceKm);
     const [anchorX, anchorY] = snapToHexGrid(r * Math.cos(angle), r * Math.sin(angle));
     const { u, flag } = formationLayout(FLEET_FORMATIONS[faction], SHIPS_PER_FACTION);
-    return u.map(([fwd, lat, df], i) => {
+    u.forEach(([fwd, lat, df], i) => {
       const [dx, dy] = shipHexOffset(fwd, lat);
-      return {
-        id: `${faction}-ship-${i}`, kind: "ship", faction, isFlag: i === flag,
-        label: i === flag ? "★" : String(i + 1),
-        facingDeg: DIR_ANGLE[df === 0 ? 0 : (df > 0 ? 5 : 1)],
-        x: anchorX + dx, y: anchorY + dy,
-      };
+      const [c, rIdx] = pixelToHexIndex(anchorX + dx, anchorY + dy);
+      SC.spawnShip(world, {
+        faction, c, r: rIdx, dir: df === 0 ? 0 : (df > 0 ? 5 : 1), isFlag: i === flag,
+        label: `${faction[0].toUpperCase()}${i + 1}`,
+      });
     });
+  }
+}
+function ensureShipsSpawned(layout) {
+  if (shipsSpawned) return;
+  spawnInitialShips(layout);
+  shipsSpawned = true;
+}
+
+// Individual ship tokens, not one "12" blob per faction -- each ship sits
+// on its own hex cell, read straight from the world's live Position/
+// Facing components (not recomputed from a formation formula -- see
+// spawnInitialShips) via shipHexOffset, the same conversion the grid
+// itself uses, so a ship's hex cell always lines up with the hex cells
+// actually drawn on screen. Called fresh every render (World lookups are
+// cheap; this is no more expensive than the old formula-driven version).
+function shipsSnapshot() {
+  return SC.aliveShips(world).map(e => {
+    const [c, r] = SC.posOf(world, e);
+    const [x, y] = shipHexOffset(c, r);
+    return {
+      id: e, kind: "ship", faction: SC.factionOf(world, e), isFlag: SC.isFlagship(world, e),
+      label: SC.labelOf(world, e), facingDeg: DIR_ANGLE[SC.facingOf(world, e)],
+      x, y,
+    };
   });
 }
 
@@ -659,10 +682,10 @@ function renderSystem3D(entry, data) {
   const scene = ensureScene3D();
 
   const layout = layoutSystemWithMoons(data, { maxPixel: ORBIT_MAX_PX, localMaxPixel: LOCAL_MAX_PX });
-  const ships = placeShips(layout);
-  const battlePair = nearbyBattlePair(ships);
+  ensureShipsSpawned(layout);
+  const ships = shipsSnapshot();
 
-  scene.rebuild(({ addBody, addRing, addShip, addAsteroidBelt, addSpacetimeGrid }) => {
+  scene.rebuild(({ addBody, addRing, addShip, addAsteroidBelt, addSpacetimeGrid, addTracer }) => {
     addSpacetimeGrid({ segments: warpedGridLines(gravityWells(layout)) });
     if (layout.center) {
       addBody({ x: 0, z: 0, radius: layout.center.rPx, color: colorsFor(layout.center).fill, data: layout.center, emissive: true, textureUrl: textureFor(layout.center) });
@@ -686,22 +709,20 @@ function renderSystem3D(entry, data) {
     for (const s of ships) {
       addShip({
         x: s.x, z: s.y, colorHex: colorsFor(s).fill, data: s,
-        selected: s.faction === selectedFleet, facingDeg: s.facingDeg,
+        selected: s.id === selectedShip, facingDeg: s.facingDeg,
       });
     }
+    // A shot's tracer -- read once here and cleared right after (see the
+    // `effects` declaration above), so it only ever shows for the one
+    // render a fire command triggers.
+    for (const eff of effects) addTracer({ from: shipHexOffset(...eff.from), to: shipHexOffset(...eff.to), hit: eff.hit });
   });
+  effects.length = 0;
 
   canvas3d.onclick = ev => {
     if (sceneJustDragged) { sceneJustDragged = false; return; }
     const hit = scene.pick(ev.clientX, ev.clientY);
-
-    if (hit?.kind === "ship") { selectOrDeselectFleet(hit.faction); return; }
-
-    if (selectedFleet) {
-      const ground = scene.groundPoint(ev.clientX, ev.clientY);
-      if (ground) moveSelectedFleetTo(...pixelToKm(layout, ground[0], ground[1]));
-      return;
-    }
+    if (handleShipOrDestinationClick(hit, scene.groundPoint(ev.clientX, ev.clientY))) return;
 
     if (hit?.kind === "star") { setHint(""); showBodyInfo(hit); return; }
     if (hit?.kind === "moon") { setHint(`${hit.label} — a moon of ${hit.parentLabel}.`); showBodyInfo(hit); return; }
@@ -721,8 +742,6 @@ function renderSystem3D(entry, data) {
     showHoverInfo(scene.pick(ev.clientX, ev.clientY));
   };
   canvas3d.onmouseleave = () => showHoverInfo(null);
-
-  wireBattleButton(battlePair);
 
   renderInfoPanel();
   renderBreadcrumb();
@@ -788,8 +807,8 @@ function renderSystem2D(entry, data) {
   const cx = canvas.width / 2, cy = canvas.height / 2;
 
   const layout = layoutSystemWithMoons(data, { maxPixel: ORBIT_MAX_PX, localMaxPixel: LOCAL_MAX_PX });
-  const ships = placeShips(layout);
-  const battlePair = nearbyBattlePair(ships);
+  ensureShipsSpawned(layout);
+  const ships = shipsSnapshot();
 
   // Only a floor, no ceiling -- a real body's on-screen size grows freely
   // with zoom, same as the 3D scene's actual spheres do (there's nothing
@@ -845,7 +864,7 @@ function renderSystem2D(entry, data) {
     ctx.stroke();
     return [sx, sy, rPx];
   };
-  // One ship, one small hex on its own hex cell (see placeShips) -- filled
+  // One ship, one small hex on its own hex cell (see shipsSnapshot) -- filled
   // translucent (SHIP_FILL_ALPHA) in the faction color so a tightly-packed
   // formation still reads as individual ships rather than one solid blob.
   // Facing shows as edge thickness, not a separate arrow: the single edge
@@ -901,8 +920,19 @@ function renderSystem2D(entry, data) {
       drawDot(m, false);
     }
   }
-  for (const s of ships) s.hitRPx = drawShip(s, s.faction === selectedFleet);
+  for (const s of ships) s.hitRPx = drawShip(s, s.id === selectedShip);
+  // A shot's tracer -- read once here and cleared right after (see the
+  // `effects` declaration above), so it only ever shows for the one
+  // render a fire command triggers.
+  ctx.lineWidth = 1.5;
+  for (const eff of effects) {
+    const [fx, fy] = worldToScreen(camera2d, ...shipHexOffset(...eff.from));
+    const [tx, ty] = worldToScreen(camera2d, ...shipHexOffset(...eff.to));
+    ctx.strokeStyle = eff.hit ? "#ff3355" : "#8899aa";
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
+  }
   ctx.restore();
+  effects.length = 0;
 
   canvas.onmousedown = ev => {
     if (ev.button !== 2) return;
@@ -944,14 +974,7 @@ function renderSystem2D(entry, data) {
     const rect = canvas.getBoundingClientRect();
     const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
     const hit = hitAt(x, y);
-
-    if (hit?.kind === "ship") { selectOrDeselectFleet(hit.faction); return; }
-
-    if (selectedFleet) {
-      const [wx, wy] = screenToWorld(camera2d, x, y);
-      moveSelectedFleetTo(...pixelToKm(layout, wx, wy));
-      return;
-    }
+    if (handleShipOrDestinationClick(hit, screenToWorld(camera2d, x, y))) return;
 
     if (hit?.kind === "star") {
       setHint("");
@@ -996,8 +1019,6 @@ function renderSystem2D(entry, data) {
     render();
   };
 
-  wireBattleButton(battlePair);
-
   renderInfoPanel();
   renderBreadcrumb();
 }
@@ -1040,13 +1061,13 @@ function render() {
 
 function zoomIn(enter, label) {
   path.push({ ...enter, label });
-  selectedFleet = null;
+  selectedShip = null; activation = null; travelArmed = false;
   setHint("");
   render();
 }
 function zoomTo(index) {
   path = path.slice(0, index + 1);
-  selectedFleet = null;
+  selectedShip = null; activation = null; travelArmed = false;
   setHint("");
   render();
 }
@@ -1072,8 +1093,19 @@ function renderBreadcrumb() {
 
 zoomOutBtn.onclick = zoomOut;
 document.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") { zoomOut(); return; }
+  if (ev.key === "Escape") { if (selectedShip != null) endActivation(); else zoomOut(); return; }
   if (path[path.length - 1].level !== "system") return;
+  // Same keybinds battle/input.js uses for a selected unit -- Q/E turn,
+  // W/S forward/back, F arms fire mode, Space ends the activation.
+  if (selectedShip != null) {
+    const k = ev.key.toLowerCase();
+    if (k === "q") { doTurn(1); return; }
+    if (k === "e") { doTurn(-1); return; }
+    if (k === "w") { doForward(); return; }
+    if (k === "s") { doBackward(); return; }
+    if (k === "f") { armFireMode(); return; }
+    if (ev.key === " ") { ev.preventDefault(); endActivation(); return; }
+  }
   if (ev.key === "=" || ev.key === "+") {
     if (webglFailed) zoomSystemByKey2D(KEY_ZOOM_FACTOR); else zoomSystemByKey3D(KEY_ZOOM_FACTOR);
   } else if (ev.key === "-" || ev.key === "_") {
