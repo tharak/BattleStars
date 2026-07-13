@@ -179,7 +179,6 @@ function doTurn(dir) {
 }
 function moveResultHint(res) {
   if (res.reason === "shaken") setHint("Shaken — refuses to close the distance.");
-  else if (res.reason === "blocked") setHint("Blocked — that hex is occupied.");
 }
 // A hex in the asteroid field doesn't block movement outright (see
 // shipCombat.js's stepInto -- only ship occupancy does), it just costs

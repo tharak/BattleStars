@@ -130,19 +130,19 @@ export function turn(world, e, dir) {
 export const forwardHex = (world, e) => neighbor(posOf(world, e), facingOf(world, e));
 export const backwardHex = (world, e) => neighbor(posOf(world, e), (facingOf(world, e) + 3) % 6);
 
-// Both return {ok:true} or {ok:false, reason:"blocked"|"shaken"} -- the
-// caller (map/main.js) turns `reason` into hint text; neither mutates MP,
-// that's the caller's own activation bookkeeping (mirroring how
+// Both return {ok:true} or {ok:false, reason:"shaken"} -- the caller
+// (map/main.js) turns `reason` into hint text; neither mutates MP, that's
+// the caller's own activation bookkeeping (mirroring how
 // turnEngine.js's doForward/doBackward, not systems.js, own `act.mp`).
-// Only *ship* occupancy blocks a move outright -- unlike legalTargets'
-// LOS check, terrain (the asteroid field) never makes a hex unenterable
-// here, it just costs more MP, which is the caller's own bookkeeping to
-// enforce before ever calling this (see beltObstacles/doForward in
-// map/main.js).
+// Nothing about a hex's occupancy blocks a move here anymore -- ships
+// don't collide with each other (a deliberate scope cut: a separate
+// collision mechanic is planned later) or with the asteroid field (that
+// only ever costs extra MP, see hexMoveCost/beltObstacles in
+// map/main.js, never blocks outright). Morale is the only thing that can
+// still refuse a step.
 function stepInto(world, e, dir) {
   const pos = posOf(world, e);
   const nx = neighbor(pos, dir);
-  if (occupiedSet(world).has(key(nx[0], nx[1]))) return { ok: false, reason: "blocked" };
   if (moraleOf(world, e) === MoraleState.SHAKEN) {
     const ne = nearestEnemy(world, e);
     if (ne && hexDist(nx, posOf(world, ne)) < hexDist(pos, posOf(world, ne))) return { ok: false, reason: "shaken" };
