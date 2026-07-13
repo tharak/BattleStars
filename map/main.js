@@ -218,7 +218,7 @@ const BELT_HEIGHT_PX = 5;
 const GRID_HEX_SIZE_PX = 5;
 const GRID_EXTENT_PX = ORBIT_MAX_PX + 80;
 const GRID_LINE_COLOR = "#39ff14"; // neon green -- matches scene3d.js's GRID_COLOR
-const GRID_LINE_OPACITY = 0.35; // softer than the original 0.6 -- was reading as too bright
+const GRID_LINE_OPACITY = 0.1; // down from 0.6, then 0.35 -- still reading as too bright
 
 // A fleet's world position uses the exact same log-distance scale as every
 // real body in this view, so "close" means close in the system,
