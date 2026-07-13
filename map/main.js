@@ -289,7 +289,14 @@ function warpedGridLines(wells) {
       if (d < 1e-6) continue;
       const falloff = Math.max(w.rPx * 2, 20);
       const strength = w.rPx * 9;
-      const pull = Math.min(strength / (1 + (d * d) / (falloff * falloff)), d * 0.85);
+      // Gaussian, not the 1/(1+x^2) curve tried first -- that one has a
+      // long tail that never really reaches zero, so a heavy well (the
+      // Sun, mainly) kept tugging on every other well's own vertices from
+      // clear across the system. That visibly dragged each planet's
+      // funnel off-center, toward the Sun, so the planet no longer sat at
+      // the middle of its own well. Gaussian falls off fast enough past
+      // its own falloff radius that wells stay independent of each other.
+      const pull = Math.min(strength * Math.exp(-(d * d) / (falloff * falloff)), d * 0.85);
       wx += (dx / d) * pull;
       wz += (dz / d) * pull;
     }
