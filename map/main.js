@@ -42,6 +42,10 @@ const infoDeselectBtn = document.getElementById("infoDeselectBtn");
 const mapArea = document.getElementById("mapArea");
 const battleArea = document.getElementById("battleArea");
 const battleOverlay = document.getElementById("overlay");
+const battleMenuBtn = document.getElementById("btnMenu");
+const battleOverlayMenuBtn = document.getElementById("ovMenu");
+const battleStepBtn = document.getElementById("btnStep");
+const battleAutoBtn = document.getElementById("btnAuto");
 
 // The tactical battle, embedded straight into this page instead of a
 // window.location.href to battle.html -- see startMapBattle/exitMapBattle
@@ -58,8 +62,8 @@ wireBattle(BattleState);
 // reaches for a #menu screen this page doesn't have (that's battle.html's
 // scenario picker, which this integration deliberately skips -- see
 // startMapBattle). Point them at the map instead.
-document.getElementById("btnMenu").onclick = exitMapBattle;
-document.getElementById("ovMenu").onclick = exitMapBattle;
+battleMenuBtn.onclick = exitMapBattle;
+battleOverlayMenuBtn.onclick = exitMapBattle;
 
 // Whichever two different-faction ships are nearest each other, if any
 // pair is within BATTLE_PROXIMITY_PX -- not just whether one exists,
@@ -76,6 +80,11 @@ function nearbyBattlePair(ships) {
     }
   }
   return null;
+}
+// Shared by both renderSystem3D/2D's end-of-render Battle button wiring.
+function wireBattleButton(battlePair) {
+  battleControls.style.display = battlePair ? "flex" : "none";
+  battleBtn.onclick = battlePair ? () => startMapBattle(battlePair[0], battlePair[1]) : null;
 }
 
 // Builds a real scenario from the two actual colliding fleets -- their
@@ -104,8 +113,8 @@ function startMapBattle(factionA, factionB) {
   BattleState.SIZE = SHIPS_PER_FACTION;
   BattleState.moveMode = 0;
   BattleState.deployMode = 1;
-  document.getElementById("btnStep").style.display = "";
-  document.getElementById("btnAuto").style.display = "";
+  battleStepBtn.style.display = "";
+  battleAutoBtn.style.display = "";
   topbar.style.display = "none";
   hint.style.display = "none";
   battleControls.style.display = "none";
@@ -165,6 +174,36 @@ function infoFor(hit) {
   if (hit.kind === "belt") return { name: hit.label, detail: "Asteroid belt — no individual bodies to explore." };
   if (hit.kind === "planet") return { name: hit.label, detail: "Planet." };
   return null;
+}
+// Puts whatever was just clicked into the info panel. Shared by both the
+// 3D and 2D click handlers' star/moon/planet/belt branches -- each still
+// owns its own setHint(...) wording and camera-reset/focus call (those
+// genuinely differ per render path), but the panel update itself doesn't.
+function showBodyInfo(hit) {
+  lastClickedInfo = infoFor(hit);
+  renderInfoPanel();
+}
+// Selecting, deselecting, and moving a fleet do exactly the same thing
+// regardless of which render path's canvas the click came from -- only
+// how a click becomes "which ship" or "which world point" differs
+// between the two. Shared here so that logic exists once.
+function selectOrDeselectFleet(faction) {
+  if (selectedFleet === faction) {
+    selectedFleet = null;
+    setHint("");
+  } else {
+    selectedFleet = faction;
+    setHint(`${FACTIONS[faction].label} fleet selected — click a destination to move it, or click it again to deselect.`);
+  }
+  renderInfoPanel();
+  render();
+}
+function moveSelectedFleetTo(xKm, yKm) {
+  moveFleet(selectedFleet, xKm, yKm);
+  setHint(`${FACTIONS[selectedFleet].label} fleet moved.`);
+  selectedFleet = null;
+  renderInfoPanel();
+  render();
 }
 // Formation choice buttons are built fresh each call (not once at init)
 // since which one should show as "active" (the current FLEET_FORMATIONS
@@ -588,50 +627,27 @@ function renderSystem3D(entry, data) {
     if (sceneJustDragged) { sceneJustDragged = false; return; }
     const hit = scene.pick(ev.clientX, ev.clientY);
 
-    if (hit?.kind === "ship") {
-      if (selectedFleet === hit.faction) {
-        selectedFleet = null;
-        setHint("");
-        renderInfoPanel();
-        render();
-        return;
-      }
-      selectedFleet = hit.faction;
-      setHint(`${FACTIONS[hit.faction].label} fleet selected — click a destination to move it, or click it again to deselect.`);
-      renderInfoPanel();
-      render();
-      return;
-    }
+    if (hit?.kind === "ship") { selectOrDeselectFleet(hit.faction); return; }
 
     if (selectedFleet) {
       const ground = scene.groundPoint(ev.clientX, ev.clientY);
-      if (ground) {
-        const [xKm, yKm] = pixelToKm(layout, ground[0], ground[1]);
-        moveFleet(selectedFleet, xKm, yKm);
-        setHint(`${FACTIONS[selectedFleet].label} fleet moved.`);
-        selectedFleet = null;
-        renderInfoPanel();
-        render();
-      }
+      if (ground) moveSelectedFleetTo(...pixelToKm(layout, ground[0], ground[1]));
       return;
     }
 
-    if (hit?.kind === "star") { scene.resetCamera(); setHint(""); lastClickedInfo = infoFor(hit); renderInfoPanel(); return; }
-    if (hit?.kind === "moon") { setHint(`${hit.label} — a moon of ${hit.parentLabel}.`); lastClickedInfo = infoFor(hit); renderInfoPanel(); return; }
+    if (hit?.kind === "star") { scene.resetCamera(); setHint(""); showBodyInfo(hit); return; }
+    if (hit?.kind === "moon") { setHint(`${hit.label} — a moon of ${hit.parentLabel}.`); showBodyInfo(hit); return; }
     if (hit?.kind === "planet" || hit?.kind === "belt") {
       scene.focusOn(hit.x, hit.y, FOCUS_ZOOM);
       setHint(hit.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
-      lastClickedInfo = infoFor(hit);
-      renderInfoPanel();
+      showBodyInfo(hit);
       return;
     }
     setHint("Empty space — nothing here.");
-    lastClickedInfo = null;
-    renderInfoPanel();
+    showBodyInfo(null);
   };
 
-  battleControls.style.display = battlePair ? "flex" : "none";
-  battleBtn.onclick = battlePair ? () => startMapBattle(battlePair[0], battlePair[1]) : null;
+  wireBattleButton(battlePair);
 
   renderInfoPanel();
   renderBreadcrumb();
@@ -835,45 +851,25 @@ function renderSystem2D(entry, data) {
     };
 
     const hitShip = ships.find(within);
-    if (hitShip) {
-      if (selectedFleet === hitShip.faction) {
-        selectedFleet = null;
-        setHint("");
-        renderInfoPanel();
-        render();
-        return;
-      }
-      selectedFleet = hitShip.faction;
-      setHint(`${FACTIONS[hitShip.faction].label} fleet selected — click a destination to move it, or click it again to deselect.`);
-      renderInfoPanel();
-      render();
-      return;
-    }
+    if (hitShip) { selectOrDeselectFleet(hitShip.faction); return; }
 
     if (selectedFleet) {
       const [wx, wy] = screenToWorld(camera2d, x, y);
-      const [xKm, yKm] = pixelToKm(layout, wx, wy);
-      moveFleet(selectedFleet, xKm, yKm);
-      setHint(`${FACTIONS[selectedFleet].label} fleet moved.`);
-      selectedFleet = null;
-      renderInfoPanel();
-      render();
+      moveSelectedFleetTo(...pixelToKm(layout, wx, wy));
       return;
     }
 
     if (layout.center && within(layout.center)) {
       camera2d.x = 0; camera2d.y = 0; camera2d.zoom = 1;
       setHint("");
-      lastClickedInfo = infoFor(layout.center);
-      renderInfoPanel();
+      showBodyInfo(layout.center);
       render();
       return;
     }
     const hitMoon = layout.planets.flatMap(p => p.moons).find(within);
     if (hitMoon) {
       setHint(`${hitMoon.label} — a moon of ${hitMoon.parentLabel}.`);
-      lastClickedInfo = infoFor(hitMoon);
-      renderInfoPanel();
+      showBodyInfo(hitMoon);
       return;
     }
     const hitPlanet = layout.planets.find(within);
@@ -881,14 +877,12 @@ function renderSystem2D(entry, data) {
       camera2d.x = hitPlanet.x; camera2d.y = hitPlanet.y;
       camera2d.zoom = clampZoom2d(Math.max(camera2d.zoom, FOCUS_ZOOM));
       setHint(hitPlanet.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
-      lastClickedInfo = infoFor(hitPlanet);
-      renderInfoPanel();
+      showBodyInfo(hitPlanet);
       render();
       return;
     }
     setHint("Empty space — nothing here.");
-    lastClickedInfo = null;
-    renderInfoPanel();
+    showBodyInfo(null);
   };
 
   canvas.onwheel = ev => {
@@ -903,8 +897,7 @@ function renderSystem2D(entry, data) {
     render();
   };
 
-  battleControls.style.display = battlePair ? "flex" : "none";
-  battleBtn.onclick = battlePair ? () => startMapBattle(battlePair[0], battlePair[1]) : null;
+  wireBattleButton(battlePair);
 
   renderInfoPanel();
   renderBreadcrumb();
