@@ -339,6 +339,29 @@ const MOON_COLORS = {
 };
 const ID_COLORS = { ...PLANET_COLORS, ...MOON_COLORS };
 
+// Real photo textures (solarsystemscope.com, CC BY 4.0), keyed the same
+// way ID_COLORS is -- only the 3D scene uses these (see textureFor/
+// renderSystem3D); the 2D fallback has no UV-mapped surface to put a
+// photo on, so it keeps reading ID_COLORS/colorsFor's flat tint the same
+// as every body without an entry here still does in 3D too (every moon
+// but Earth's own, the belt). Only bodies solarsystemscope actually
+// publishes a real photo for get an entry; there's no "closest guess"
+// fallback texture for the rest.
+const TEXTURE_DIR = "map/textures/";
+const BODY_TEXTURES = {
+  sun: TEXTURE_DIR + "2k_sun.jpg",
+  mercury: TEXTURE_DIR + "2k_mercury.jpg",
+  venus: TEXTURE_DIR + "2k_venus_surface.jpg",
+  earth: TEXTURE_DIR + "2k_earth_daymap.jpg",
+  mars: TEXTURE_DIR + "2k_mars.jpg",
+  jupiter: TEXTURE_DIR + "2k_jupiter.jpg",
+  saturn: TEXTURE_DIR + "2k_saturn.jpg",
+  uranus: TEXTURE_DIR + "2k_uranus.jpg",
+  neptune: TEXTURE_DIR + "2k_neptune.jpg",
+  moon: TEXTURE_DIR + "2k_moon.jpg",
+};
+const textureFor = cell => BODY_TEXTURES[cell.id];
+
 // Faction fleet/ship colors (see FACTIONS in levels.js) -- checked via
 // cell.faction rather than cell.id, since fleet/ship ids are per-instance
 // (blue-ship-3, ...), not a shared small id space like planets/moons.
@@ -626,7 +649,7 @@ function renderSystem3D(entry, data) {
   scene.rebuild(({ addBody, addRing, addShip, addAsteroidBelt, addSpacetimeGrid }) => {
     addSpacetimeGrid({ segments: warpedGridLines(gravityWells(layout)) });
     if (layout.center) {
-      addBody({ x: 0, z: 0, radius: layout.center.rPx, color: colorsFor(layout.center).fill, data: layout.center, emissive: true });
+      addBody({ x: 0, z: 0, radius: layout.center.rPx, color: colorsFor(layout.center).fill, data: layout.center, emissive: true, textureUrl: textureFor(layout.center) });
     }
     for (const p of layout.planets) {
       if (p.kind === "belt") {
@@ -638,10 +661,10 @@ function renderSystem3D(entry, data) {
         continue;
       }
       addRing(0, 0, Math.hypot(p.x, p.y));
-      addBody({ x: p.x, z: p.y, radius: p.rPx, color: colorsFor(p).fill, data: p });
+      addBody({ x: p.x, z: p.y, radius: p.rPx, color: colorsFor(p).fill, data: p, textureUrl: textureFor(p) });
       for (const m of p.moons) {
         addRing(p.x, p.y, m.localRingPx, m.inclinationDeg);
-        addBody({ x: m.x, y: m.tiltHeight, z: m.tiltZ, radius: m.rPx, color: colorsFor(m).fill, data: m });
+        addBody({ x: m.x, y: m.tiltHeight, z: m.tiltZ, radius: m.rPx, color: colorsFor(m).fill, data: m, textureUrl: textureFor(m) });
       }
     }
     for (const s of ships) {
