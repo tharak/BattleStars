@@ -45,7 +45,20 @@ import { hexEdgeWidths } from "../battle/hexmath.js";
 const BG_COLOR = 0x111624;
 const RING_COLOR = 0x2a3350;
 const GRID_COLOR = 0x39ff14; // neon green -- deliberately loud against BG_COLOR, unlike RING_COLOR
-const SHIP_HEIGHT_ABOVE_PLANE = 1.2;
+// Y heights of everything that lies flat on (or near) the ecliptic plane,
+// deliberately spread far apart rather than clustered near 0 -- the
+// OrthographicCamera's depth range is (1, 6000) (see camera below), so
+// tight gaps like the 0.05 this scene used to use for orbit rings don't
+// reliably resolve in the depth buffer at typical viewing distances and
+// visibly z-fight/flicker against the grid (or against each other) as the
+// camera moves, rather than reading as "above" it. Ordered bottom to top:
+// the spacetime grid (GRID_Y, unchanged at the literal ground reference)
+// < orbit rings < a ship's own flat hex token < the ship's raised 3D cone.
+const GRID_Y = 0;
+const ORBIT_RING_Y = 0.4;
+const SHIP_BASE_Y = 0.8;
+const SHIP_BASE_EDGE_Y = 0.85;
+const SHIP_HEIGHT_ABOVE_PLANE = 3;
 const SHIP_FILL_ALPHA = 0.5;
 
 export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
@@ -168,7 +181,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     for (let i = 0; i <= 72; i++) {
       const a = (i / 72) * Math.PI * 2;
       const localX = Math.cos(a) * radius, localZ = Math.sin(a) * radius;
-      pts.push(new THREE.Vector3(cx + localX, 0.05 - localZ * Math.sin(tiltRad), cz + localZ * Math.cos(tiltRad)));
+      pts.push(new THREE.Vector3(cx + localX, ORBIT_RING_Y - localZ * Math.sin(tiltRad), cz + localZ * Math.cos(tiltRad)));
     }
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
     const mat = new THREE.LineBasicMaterial({ color: RING_COLOR, transparent: true, opacity: 0.4 });
@@ -185,13 +198,20 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   // manual sign-guessing about which way "positive rotation" goes in this
   // scene's particular axis convention.
   function addShip({ x, z, colorHex, data, selected, facingDeg }) {
+    // Grounded at the plane, not lifted -- unlike the old ring-only
+    // marker, this group now holds both the flat hex token (which
+    // should visibly rest on the grid, at SHIP_BASE_Y) and the raised
+    // cone (which shouldn't); lifting the whole group the way the cone
+    // alone used to require would drag the token up with it, floating
+    // it well above the grid/orbit rings instead of sitting on them.
     const group = new THREE.Group();
-    group.position.set(x, SHIP_HEIGHT_ABOVE_PLANE, z);
+    group.position.set(x, 0, z);
 
     const s = 3;
     const geo = new THREE.ConeGeometry(s * 0.55, s * 1.6, 3);
     const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.6 });
     const ship = new THREE.Mesh(geo, mat);
+    ship.position.y = SHIP_HEIGHT_ABOVE_PLANE;
     const rad = facingDeg * Math.PI / 180;
     ship.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
@@ -200,6 +220,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     group.add(ship);
     if (selected) {
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffffff }));
+      edges.position.y = SHIP_HEIGHT_ABOVE_PLANE;
       edges.quaternion.copy(ship.quaternion);
       group.add(edges);
     }
@@ -212,7 +233,10 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     // drawShip, so a tightly-packed formation still reads as individual
     // ships. Corner k sits at angle (60k-90) -- a pointy-top hex, same
     // orientation as the hex cell this ship already sits on (see
-    // shipHexOffset in map/main.js).
+    // shipHexOffset in map/main.js). Sits at SHIP_BASE_Y, clear of both
+    // the grid and the orbit rings below it (see the Y-height comment
+    // near SHIP_BASE_Y above) so it reads as a token resting on the
+    // grid, not floating at the cone's own height.
     const tapRadius = Math.max(s * 1.8, 3);
     const corners = [];
     for (let k = 0; k < 6; k++) {
@@ -222,7 +246,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     const fanPositions = [];
     for (let k = 0; k < 6; k++) {
       const [x1, z1] = corners[k], [x2, z2] = corners[(k + 1) % 6];
-      fanPositions.push(0, 0, 0, x1, 0, z1, x2, 0, z2);
+      fanPositions.push(0, SHIP_BASE_Y, 0, x1, SHIP_BASE_Y, z1, x2, SHIP_BASE_Y, z2);
     }
     const fanGeo = new THREE.BufferGeometry();
     fanGeo.setAttribute("position", new THREE.Float32BufferAttribute(fanPositions, 3));
@@ -244,7 +268,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       for (let k = 0; k < 6; k++) {
         if (widths[k] !== w) continue;
         const [x1, z1] = corners[k], [x2, z2] = corners[(k + 1) % 6];
-        flat.push(x1, 0.03, z1, x2, 0.03, z2);
+        flat.push(x1, SHIP_BASE_EDGE_Y, z1, x2, SHIP_BASE_EDGE_Y, z2);
       }
       const edgeGeo = new LineSegmentsGeometry();
       edgeGeo.setPositions(flat);
@@ -306,7 +330,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     const flat = [];
     for (let i = 0; i < segments.length; i += 2) {
       const [x1, z1] = segments[i], [x2, z2] = segments[i + 1];
-      flat.push(x1, 0, z1, x2, 0, z2);
+      flat.push(x1, GRID_Y, z1, x2, GRID_Y, z2);
     }
     const geo = new LineSegmentsGeometry();
     geo.setPositions(flat);
