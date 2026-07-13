@@ -475,11 +475,6 @@ const camera2d = { x: 0, y: 0, zoom: 1 };
 const clampZoom2d = z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 const WHEEL_SENSITIVITY = 0.0015;
 const DRAG_THRESHOLD_PX = 4;
-// A planet and a moon share one physical size curve (see
-// layoutSystemWithMoons), but their on-screen ceilings differ so a moon
-// dot can never grow to rival its planet's even at max zoom.
-const BODY_MAX_SCREEN_PX = 46;
-const MOON_MAX_SCREEN_PX = 20;
 const FLEET_SHIP_BASE_PX = 5;
 
 // A small ship-arrow triangle, proportionally scaled from its own size `s`
@@ -537,10 +532,18 @@ function renderSystem2D(entry, data) {
     ? movementRangeHexes(FLEET_POSITIONS[selectedFleet].xKm, FLEET_POSITIONS[selectedFleet].yKm)
     : null;
 
-  const screenRadius = body => {
-    const cap = body.kind === "moon" ? MOON_MAX_SCREEN_PX : BODY_MAX_SCREEN_PX;
-    return Math.min(Math.max(body.rPx * camera2d.zoom, 1.2), cap);
-  };
+  // Only a floor, no ceiling -- a real body's on-screen size grows freely
+  // with zoom, same as the 3D scene's actual spheres do (there's nothing
+  // to clamp there; an orthographic camera's zoom scales the whole
+  // projected view uniformly). A shared max here used to clamp the Sun,
+  // then every planet in turn, to the same fixed pixel size once zoomed
+  // in enough -- by zoom ~10 the Sun and Neptune were rendering at the
+  // exact same size, and by max zoom every body (including Mercury) was
+  // identical, which 3D never does. The floor stays: it's a different,
+  // legitimate concern (keeping a small far-out body from shrinking to
+  // sub-pixel/unclickable at low zoom), not one that collapses bodies
+  // into each other.
+  const screenRadius = body => Math.max(body.rPx * camera2d.zoom, 1.2);
 
   ctx.fillStyle = BOARD_TINT.gridCell;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
