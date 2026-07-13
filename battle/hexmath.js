@@ -22,6 +22,39 @@ export function facingArrowPoints(x, y, hs, angleDeg) {
   ];
 }
 
+// A ship token's own hex reads its facing off the token's shape itself,
+// no separate arrow needed: the single edge pointing exactly toward
+// facingDeg is drawn thickest (front, best-armored side), the opposite
+// edge thinnest (rear, most vulnerable), and the 4 side edges in between
+// (flank). A pointy-top hex's *edges* (not its vertices) point along
+// exactly the same 6 directions DIR_ANGLE already uses -- corner k sits
+// at angle (60k-90), so the edge between corner k and k+1 has an outward
+// normal at 60k-60 -- so this needs no separate direction table, and the
+// same edges line up with the hex-grid cells ships already sit on (see
+// map/main.js's warpedGridLines, which tiles corners the same way).
+export const HEX_EDGE_FRONT_PX = 3, HEX_EDGE_FLANK_PX = 2, HEX_EDGE_REAR_PX = 1;
+export function hexEdgeWidths(facingDeg) {
+  const widths = [];
+  for (let k = 0; k < 6; k++) {
+    const edgeAngle = 60 * k - 60;
+    let diff = Math.round((((edgeAngle - facingDeg) % 360) + 360) % 360);
+    if (diff > 180) diff = 360 - diff;
+    widths.push(diff === 0 ? HEX_EDGE_FRONT_PX : diff === 180 ? HEX_EDGE_REAR_PX : HEX_EDGE_FLANK_PX);
+  }
+  return widths;
+}
+// The 6 corners of that same pointy-top hex, in order, around (cx,cy) at
+// radius s -- shared by the 2D and 3D ship-token renderers so a token's
+// fill/edges can't drift out of sync with each other.
+export function hexCorners(cx, cy, s) {
+  const pts = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (60 * k - 90) * Math.PI / 180;
+    pts.push([cx + Math.cos(a) * s, cy + Math.sin(a) * s]);
+  }
+  return pts;
+}
+
 export function toAxial(c, r) { return [c - ((r - (r & 1)) >> 1), r]; }
 export function fromAxial(q, r) { return [q + ((r - (r & 1)) >> 1), r]; }
 

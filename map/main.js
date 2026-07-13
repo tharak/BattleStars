@@ -9,7 +9,7 @@ import {
   FLEET_FORMATIONS, FORMATION_NAMES, FACTIONS, SHIPS_PER_FACTION,
   FLEET_POSITIONS, initFleetPositions, moveFleet,
 } from "./levels.js";
-import { DIR_ANGLE } from "../battle/hexmath.js";
+import { DIR_ANGLE, hexEdgeWidths, hexCorners } from "../battle/hexmath.js";
 import { formationLayout } from "../battle/formations.js";
 import { BOARD_TINT } from "../battle/colors.js";
 import { State as BattleState } from "../battle/state.js";
@@ -704,18 +704,15 @@ const DRAG_THRESHOLD_PX = 4;
 // GRID_HEX_SIZE_PX's flat-to-flat width is its own hard ceiling on how
 // big this can get before neighboring ships' icons start touching.
 const SHIP_ICON_BASE_PX = 2.2;
+const SHIP_FILL_ALPHA = 0.5;
 
-// A small ship-arrow triangle, proportionally scaled from its own size `s`
-// (unlike battle/hexmath.js's facingArrowPoints, whose fixed hs-4/hs-11
-// offsets go negative -- and the triangle inverts -- below hs~11, too big
-// for these small fleet icons).
-function shipTriangle(x, y, s, angleDeg) {
-  const a = angleDeg * Math.PI / 180;
-  return [
-    [x + Math.cos(a) * s, y + Math.sin(a) * s],
-    [x + Math.cos(a + 2.6) * s * 0.6, y + Math.sin(a + 2.6) * s * 0.6],
-    [x + Math.cos(a - 2.6) * s * 0.6, y + Math.sin(a - 2.6) * s * 0.6],
-  ];
+// "#rrggbb" -> "rgba(r,g,b,alpha)" -- ship tokens fill at 50% alpha (see
+// drawShip) so overlapping/adjacent ships in a tight formation still read
+// as individual hexes rather than one solid blob, unlike every other body
+// on this map, which is fully opaque.
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 // Right-button click-and-drag panning, only reachable once the 2D fallback
@@ -810,24 +807,36 @@ function renderSystem2D(entry, data) {
     ctx.stroke();
     return [sx, sy, rPx];
   };
-  // One ship, one small triangle pointing its real formation-assigned
-  // facing (see placeShips) -- the old drawFleet drew one stylized 3-cone
-  // wedge standing in for a whole "12" fleet; now each of those 12 ships
-  // is its own icon on its own hex cell, so this draws exactly one.
+  // One ship, one small hex on its own hex cell (see placeShips) -- filled
+  // translucent (SHIP_FILL_ALPHA) in the faction color so a tightly-packed
+  // formation still reads as individual ships rather than one solid blob.
+  // Facing shows as edge thickness, not a separate arrow: the single edge
+  // pointing the ship's real formation-assigned facing is thickest (best-
+  // armored side), the opposite edge thinnest (most vulnerable), the 4
+  // side edges in between -- see hexEdgeWidths in battle/hexmath.js.
   const drawShip = (ship, selected) => {
     const [sx, sy] = worldToScreen(camera2d, ship.x, ship.y);
     const s = Math.min(Math.max(SHIP_ICON_BASE_PX * camera2d.zoom, 1.5), 10);
     const colors = colorsFor(ship);
     const tapRadius = Math.max(s * 1.8, 6);
-    const [tip, b1, b2] = shipTriangle(sx, sy, s, ship.facingDeg);
+    const corners = hexCorners(sx, sy, s);
+
     ctx.beginPath();
-    ctx.moveTo(...tip); ctx.lineTo(...b1); ctx.lineTo(...b2);
+    corners.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
     ctx.closePath();
-    ctx.fillStyle = colors.fill;
+    ctx.fillStyle = hexToRgba(colors.fill, SHIP_FILL_ALPHA);
     ctx.fill();
-    ctx.lineWidth = selected ? 2.5 : 1.5;
+
+    const widths = hexEdgeWidths(ship.facingDeg);
     ctx.strokeStyle = selected ? "#ffffff" : colors.stroke;
-    ctx.stroke();
+    for (let k = 0; k < 6; k++) {
+      const [x1, y1] = corners[k], [x2, y2] = corners[(k + 1) % 6];
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineWidth = selected ? widths[k] + 1 : widths[k];
+      ctx.stroke();
+    }
     return tapRadius;
   };
   // Scattered dots across the belt's real distance range (see

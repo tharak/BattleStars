@@ -35,6 +35,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { hexEdgeWidths } from "../battle/hexmath.js";
 
 // Matches battle/colors.js's BOARD_TINT.gridCell -- the tone that actually
 // covers most of the battle board (its hexes are filled with this, not
@@ -45,6 +46,7 @@ const BG_COLOR = 0x111624;
 const RING_COLOR = 0x2a3350;
 const GRID_COLOR = 0x39ff14; // neon green -- deliberately loud against BG_COLOR, unlike RING_COLOR
 const SHIP_HEIGHT_ABOVE_PLANE = 1.2;
+const SHIP_FILL_ALPHA = 0.5;
 
 export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   const scene = new THREE.Scene();
@@ -227,23 +229,57 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       edges.quaternion.copy(ship.quaternion);
       group.add(edges);
     }
-    // The cone alone is a tiny, fiddly click target -- a visible ring
-    // around it both shows where to click and (via the matching invisible
-    // disc just inside it) IS the actual click target, the same idea the
-    // 2D fallback's drawShip uses.
+
+    // The cone alone is a tiny, fiddly click target -- a flat hex beneath
+    // it both shows where to click and IS the actual click target (no
+    // separate invisible disc needed, since intersectObjects walks every
+    // mesh in the group -- see resolveHit below). Filled translucent
+    // (SHIP_FILL_ALPHA) in the faction color, same as the 2D fallback's
+    // drawShip, so a tightly-packed formation still reads as individual
+    // ships. Corner k sits at angle (60k-90) -- a pointy-top hex, same
+    // orientation as the hex cell this ship already sits on (see
+    // shipHexOffset in map/main.js).
     const tapRadius = Math.max(s * 1.8, 3);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(tapRadius * 0.92, tapRadius, 16),
-      new THREE.MeshBasicMaterial({ color: selected ? 0xffffff : colorHex, transparent: true, opacity: selected ? 0.9 : 0.55, side: THREE.DoubleSide }),
+    const corners = [];
+    for (let k = 0; k < 6; k++) {
+      const a = (60 * k - 90) * Math.PI / 180;
+      corners.push([Math.cos(a) * tapRadius, Math.sin(a) * tapRadius]);
+    }
+    const fanPositions = [];
+    for (let k = 0; k < 6; k++) {
+      const [x1, z1] = corners[k], [x2, z2] = corners[(k + 1) % 6];
+      fanPositions.push(0, 0, 0, x1, 0, z1, x2, 0, z2);
+    }
+    const fanGeo = new THREE.BufferGeometry();
+    fanGeo.setAttribute("position", new THREE.Float32BufferAttribute(fanPositions, 3));
+    const hexMesh = new THREE.Mesh(
+      fanGeo,
+      new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: SHIP_FILL_ALPHA, side: THREE.DoubleSide }),
     );
-    ring.rotation.x = -Math.PI / 2;
-    group.add(ring);
-    const hitDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(tapRadius, 12),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 }),
-    );
-    hitDisc.rotation.x = -Math.PI / 2;
-    group.add(hitDisc);
+    group.add(hexMesh);
+
+    // Facing reads as edge thickness, not a separate arrow: the edge
+    // pointing the ship's real facing is thickest (best-armored side),
+    // the opposite edge thinnest (most vulnerable), the 4 side edges in
+    // between -- see hexEdgeWidths in battle/hexmath.js. Edges sharing a
+    // width are batched into one LineSegments2 each (3 objects, not 6),
+    // since a LineMaterial's linewidth is per-material.
+    const widths = hexEdgeWidths(facingDeg);
+    for (const w of new Set(widths)) {
+      const flat = [];
+      for (let k = 0; k < 6; k++) {
+        if (widths[k] !== w) continue;
+        const [x1, z1] = corners[k], [x2, z2] = corners[(k + 1) % 6];
+        flat.push(x1, 0.03, z1, x2, 0.03, z2);
+      }
+      const edgeGeo = new LineSegmentsGeometry();
+      edgeGeo.setPositions(flat);
+      const edgeMat = new LineMaterial({
+        color: selected ? 0xffffff : colorHex, linewidth: w,
+        resolution: new THREE.Vector2(sizePx, sizePx), transparent: true, opacity: selected ? 1 : 0.9,
+      });
+      group.add(new LineSegments2(edgeGeo, edgeMat));
+    }
 
     group.userData = data;
     objectGroup.add(group);
