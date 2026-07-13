@@ -55,6 +55,7 @@ let path = [
 // morale only change via player commands (turn/forward/back/fire/Set
 // Course) from here on, never recomputed from the formation again.
 const world = new SC.World();
+const random = new SC.MathRandomSource();
 // Whichever single ship (an entity id, or null) is currently selected at
 // the System level, plus its in-progress activation -- mirrors
 // battle/state.js's `act` shape ({u,mp,moved,fired,fireMode,cmd}) but
@@ -65,8 +66,8 @@ const world = new SC.World();
 let selectedShip = null;
 let activation = null;
 let travelArmed = false;
-// Fire's own transient shot-line records (shipCombat.js's fire() pushes
-// to this) -- read once by the renderer right after a fire command and
+// Fire's own transient shot-line records, derived here from fire results
+// and read once by the renderer after a fire command, then
 // cleared immediately after, so a tracer shows for exactly one render,
 // not battle's own state.effects (this is the map's own, unrelated array).
 const effects = [];
@@ -203,7 +204,8 @@ function doFireAt(tgt) {
   if (!SC.canFire(world, activation)) return;
   if (!SC.legalTargets(world, activation.u).includes(tgt)) return;
   const firer = activation.u;
-  const result = SC.fire(world, firer, tgt, effects);
+  const result = SC.fire(world, firer, tgt, random);
+  effects.push({ from: result.from, to: result.to, hit: result.hits > 0 });
   activation.fired = true; activation.fireMode = false;
   setHint(`${SC.labelOf(world, firer)} fires (${result.arc} arc, ${result.need}+): [${result.rolls.join(" ")}] → ` +
     `${result.hits} hit${result.hits === 1 ? "" : "s"}${result.destroyed ? " — destroyed!" : ""}`);

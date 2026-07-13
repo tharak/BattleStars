@@ -6,8 +6,10 @@ import { sideName } from "./config.js";
 import { log, updatePanels } from "./panels.js";
 import { draw } from "./render.js";
 import { humanControls, startCombat } from "./turnEngine.js";
+import { BattlePhase } from "./core/phaseMachine.js";
 
 export function beginSetupFor(state, side) {
+  state.phase.transition(BattlePhase.DEPLOYMENT);
   state.setup = { side, placed: [], selected: null, flagShip: null };
   state.act = null;
   log(`${sideName(side)}: deploy your squadrons — click your shaded zone.`, "t");
@@ -56,7 +58,7 @@ export function confirmSetup(state) {
   state.setup = null;
   if (state.setupQueue.length) { beginSetupFor(state, state.setupQueue.shift()); return; }
   for (const s of [0, 1]) if (!humanControls(state, s)) {
-    const name = randomFormationName();
+    const name = randomFormationName(state.random);
     state.G.fleets[s].name = name;
     deployFormation(state, name, s);
     log(`${sideName(s)} (AI) deploys in ${name} formation.`, "t");

@@ -1,12 +1,15 @@
 // Battle lifecycle/orchestration: whose turn is it, activation flow, human
 // command handlers, and win/draw detection. Delegates actual rule
 // resolution to systems.js and reads via queries.js.
-import { MP_MAX, MAX_TURNS, MoraleState, sideName, inBounds } from "./config.js";
-import { neighbor, hexDist, key } from "./hexmath.js";
+import { MP_MAX, MAX_TURNS, MoraleState, sideName } from "./config.js";
 import { deployFormation } from "./formations.js";
-import { fire, aiActivate, routedActivation } from "./systems.js";
+import {
+  fire, aiActivate, routedActivation, rotateActivatedUnit,
+  moveActivatedUnitForward, moveActivatedUnitBackward,
+} from "./systems.js";
 import { log, clearLog, updatePanels } from "./panels.js";
 import { draw } from "./render.js";
+import { BattlePhase } from "./core/phaseMachine.js";
 import * as C from "./components.js";
 import * as Q from "./queries.js";
 
@@ -17,11 +20,11 @@ import * as Q from "./queries.js";
 // until a later DOM event, well after both modules finish loading.
 import { beginSetupFor } from "./deployment.js";
 
-const { SHAKEN, ROUTED } = MoraleState;
+const { ROUTED } = MoraleState;
 
 export function newBattle(state) {
+  state.beginBattle();
   state.BREAK_AT = (state.SIZE >> 1) + 1;
-  state.act = null; state.setup = null; state.setupQueue = []; state.effects = [];
   clearLog();
   log(`Scenario: ${state.scen.t} — ${state.SIZE} squadrons a side, breaks at ${state.BREAK_AT}`, "t");
   state.G = {
@@ -48,6 +51,7 @@ export function newBattle(state) {
   beginSetupFor(state, humanSides[0]);
 }
 export function startCombat(state) {
+  state.phase.transition(BattlePhase.COMBAT);
   const supTag = s => s === "ok" ? "" : ` (${s.toUpperCase()} SUPPLY)`;
   log(`Blue: ${state.G.fleets[0].name}${supTag(state.G.fleets[0].supply)} — Red: ${state.G.fleets[1].name}${supTag(state.G.fleets[1].supply)}`);
   newTurn(state); proceed(state);
@@ -147,43 +151,13 @@ export function switchSelection(state, e) {
   selectUnit(state, e);
 }
 export function doTurn(state, dir) { // dir: +1 left(ccw in dir index terms)… use explicit
-  if (!Q.canMove(state)) return;
-  const facing = state.world.get(state.act.u, C.Facing);
-  facing.dir = (facing.dir + dir + 6) % 6;
-  state.act.mp--; state.act.moved = true; state.act.fireMode = false;
-  draw(state); updatePanels(state);
+  if (rotateActivatedUnit(state, dir)) { draw(state); updatePanels(state); }
 }
 export function doForward(state) {
-  if (!Q.canMove(state)) return;
-  const e = state.act.u, pos = Q.posOf(state, e), facing = Q.facingOf(state, e);
-  const nx = neighbor(pos, facing);
-  if (!inBounds(nx[0], nx[1])) return;
-  if (Q.occupiedSet(state).has(key(nx[0], nx[1]))) return;
-  if (Q.moraleOf(state, e) === SHAKEN) { // may not end closer to nearest enemy
-    const ne = Q.nearestEnemy(state, e);
-    if (ne && hexDist(nx, Q.posOf(state, ne)) < hexDist(pos, Q.posOf(state, ne))) {
-      log(`${Q.labelOf(state, e)} is Shaken — it refuses to advance`, "bad"); return;
-    }
-  }
-  const p = state.world.get(e, C.Position); p.c = nx[0]; p.r = nx[1];
-  state.act.mp--; state.act.moved = true; state.act.fireMode = false;
-  draw(state); updatePanels(state);
+  if (moveActivatedUnitForward(state)) { draw(state); updatePanels(state); }
 }
 export function doBackward(state) {
-  if (!Q.canBack(state)) return;
-  const e = state.act.u, pos = Q.posOf(state, e), facing = Q.facingOf(state, e);
-  const nx = neighbor(pos, (facing + 3) % 6);
-  if (!inBounds(nx[0], nx[1])) return;
-  if (Q.occupiedSet(state).has(key(nx[0], nx[1]))) return;
-  if (Q.moraleOf(state, e) === SHAKEN) { // may not end a move closer to nearest enemy
-    const ne = Q.nearestEnemy(state, e);
-    if (ne && hexDist(nx, Q.posOf(state, ne)) < hexDist(pos, Q.posOf(state, ne))) {
-      log(`${Q.labelOf(state, e)} is Shaken — it refuses to move toward the enemy`, "bad"); return;
-    }
-  }
-  const p = state.world.get(e, C.Position); p.c = nx[0]; p.r = nx[1];
-  state.act.mp = 0; state.act.moved = true; state.act.fireMode = false;
-  draw(state); updatePanels(state);
+  if (moveActivatedUnitBackward(state)) { draw(state); updatePanels(state); }
 }
 export function doFireAt(state, tgt) {
   if (!Q.canFire(state)) return;
@@ -202,6 +176,7 @@ export function endActivation(state) {
 export function gameOver(state, winner, how) {
   const G = state.G;
   G.over = true; G.winner = winner;
+  state.phase.transition(BattlePhase.GAME_OVER);
   const surv = s => Q.aliveOfSide(state, s).reduce((a, e) => a + Q.strengthOf(state, e), 0);
   let title, body;
   if (winner === null) { title = "Draw"; body = `Both fleets stand at turn ${G.turn}.`; }

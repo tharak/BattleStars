@@ -42,7 +42,7 @@ export function formationLayout(name, size) {
   }
 }
 
-export const randomFormationName = () => FORMATION_NAMES[Math.floor(Math.random() * FORMATION_NAMES.length)];
+export const randomFormationName = random => random.pick(FORMATION_NAMES);
 export function inSetupZone(side, c) { const [lo, hi] = SETUP_ZONE[side]; return c >= lo && c <= hi; }
 
 // Creates one entity with the full standard component set and registers it

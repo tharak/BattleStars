@@ -163,8 +163,8 @@ function renderFrame(state) {
     }
   }
 
-  // transient fire effects (laser beams), pushed by systems.fire() and
-  // faded out here based on elapsed time -- see ensureEffectLoop above.
+  // Fire effects are created by the event presenter and faded here, so
+  // gameplay systems never own animation state -- see ensureEffectLoop.
   const now = performance.now();
   for (const eff of state.effects) {
     if (eff.type !== "laser") continue;

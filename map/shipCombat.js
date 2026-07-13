@@ -1,14 +1,14 @@
 // The star map's own per-ship combat/movement engine -- a faction-generic
 // sibling to battle/queries.js + battle/systems.js, built the same way
 // (pure functions over a battle/ecs.js World + battle/components.js keys),
-// but NOT a modification of either: those two files are hard-coded to
+// rather than an extension of either: those two files are hard-coded to
 // exactly 2 sides via `state.G.fleets[0,1]` / `1 - side` arithmetic and a
 // fixed alternating-turn activation model, none of which fits the map's 3
 // independent factions and lack of any bounded "battle" (ships just live
 // or die in an open sandbox, selected and commanded one at a time by
 // whoever clicks them -- there's no player-identity concept on the map,
-// same as everywhere else here). battle/*.js itself stays completely
-// unmodified so battle.html keeps working exactly as it does today.
+// same as everywhere else here). The bounded battle and open map therefore
+// remain separate rule contexts even though they share core primitives.
 //
 // Reused as-is from battle/: the World class (battle/ecs.js, already
 // generic), the component key constants (battle/components.js), the
@@ -24,15 +24,16 @@
 // map), forced rout-facing (battle hard-codes "turn to face
 // side===0?3:0", which assumes a fixed 2-sided battlefield orientation
 // this open map doesn't have), and the whole round/turn-order/win-
-// condition machinery (the map doesn't "end").
+// condition machinery (the map doesn't "end"). Both engines still share
+// the same injected random-source contract so tests and replays can control
+// every roll.
 import { World } from "../battle/ecs.js";
 import * as C from "../battle/components.js";
 import { RANGE, CMD_R, MP_MAX, MoraleState } from "../battle/config.js";
 import { hexDist, neighbor, inFireArc, incomingArc, losClear, key, argmin } from "../battle/hexmath.js";
+import { MathRandomSource } from "../battle/core/random.js";
 
-export { World, MP_MAX };
-
-const d6 = () => 1 + Math.floor(Math.random() * 6);
+export { World, MP_MAX, MathRandomSource };
 
 // --- component accessors ---------------------------------------------
 export const posOf = (world, e) => { const p = world.get(e, C.Position); return [p.c, p.r]; };
@@ -136,51 +137,47 @@ export const moveBackward = (world, e) => stepInto(world, e, (facingOf(world, e)
 
 // --- morale / destruction (battle/systems.js:17-54, supply/flagLost/
 // forced-rout-facing dropped per the file header's scope cuts) -----------
-export function moraleCheck(world, e, fromFlankOrRear) {
+export function moraleCheck(world, e, fromFlankOrRear, random) {
   if (!isAlive(world, e) || moraleOf(world, e) === MoraleState.ROUTED) return;
   const pos = posOf(world, e);
   let mod = 0;
   if (friendsOf(world, e).some(v => moraleOf(world, v) === MoraleState.STEADY && hexDist(pos, posOf(world, v)) === 1)) mod++;
   if (inCommand(world, e)) mod++;
   if (fromFlankOrRear) mod--;
-  if (d6() + mod >= 4) return;
+  if (random.d6() + mod >= 4) return;
   const morale = world.get(e, C.Morale);
   if (morale.state === MoraleState.STEADY) morale.state = MoraleState.SHAKEN;
-  else { morale.state = MoraleState.ROUTED; contagion(world, e); }
+  else { morale.state = MoraleState.ROUTED; contagion(world, e, random); }
 }
-export function contagion(world, src) {
+export function contagion(world, src, random) {
   for (const v of friendsOf(world, src).slice())
     if (isAlive(world, v) && moraleOf(world, v) !== MoraleState.ROUTED && hexDist(posOf(world, v), posOf(world, src)) <= 2)
-      moraleCheck(world, v, false);
+      moraleCheck(world, v, false, random);
 }
-export function destroy(world, e) {
+export function destroy(world, e, random) {
   world.remove(e, C.Alive);
   const wasFlag = isFlagship(world, e), faction = factionOf(world, e);
-  contagion(world, e);
-  if (wasFlag) for (const v of shipsOfFaction(world, faction)) moraleCheck(world, v, false);
+  contagion(world, e, random);
+  if (wasFlag) for (const v of shipsOfFaction(world, faction)) moraleCheck(world, v, false, random);
 }
 
 // --- firing (battle/systems.js:57-78, supply to-hit penalty dropped) ----
-// `effects` is the caller's own transient array (map/main.js's, not
-// battle's state.effects) -- one {from,to,hit} record per shot, pushed
-// here and read/cleared by the renderer after one frame (see addTracer in
-// scene3d.js). Returns {hits, rolls, need, destroyed} so the caller can
-// build its own hint text (there's no shared #log panel on the map the
-// way battle/panels.js's log() writes to).
-export function fire(world, e, tgt, effects) {
+// Returns both rule resolution and presentation coordinates. The caller may
+// create a tracer, sound, or UI message; this headless module owns none of it.
+export function fire(world, e, tgt, random) {
   const strength = strengthOf(world, e);
   const dice = moraleOf(world, e) === MoraleState.STEADY ? strength : Math.ceil(strength / 2);
   const arc = incomingArc(posOf(world, tgt), facingOf(world, tgt), posOf(world, e));
   const need = { front: 5, flank: 4, rear: 3 }[arc];
   let hits = 0; const rolls = [];
-  for (let i = 0; i < dice; i++) { const roll = d6(); rolls.push(roll); if (roll >= need) hits++; }
-  effects.push({ from: posOf(world, e), to: posOf(world, tgt), hit: hits > 0 });
+  for (let i = 0; i < dice; i++) { const roll = random.d6(); rolls.push(roll); if (roll >= need) hits++; }
+  const from = posOf(world, e), to = posOf(world, tgt);
   let destroyed = false;
   if (hits) {
     const tgtStrength = world.get(tgt, C.Strength);
     tgtStrength.value = Math.max(0, tgtStrength.value - hits);
-    if (tgtStrength.value === 0) { destroy(world, tgt); destroyed = true; }
-    else moraleCheck(world, tgt, arc !== "front");
+    if (tgtStrength.value === 0) { destroy(world, tgt, random); destroyed = true; }
+    else moraleCheck(world, tgt, arc !== "front", random);
   }
-  return { hits, rolls, arc, need, destroyed };
+  return { hits, rolls, arc, need, destroyed, from, to };
 }
