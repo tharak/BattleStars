@@ -28,8 +28,14 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
-const BG_COLOR = 0x0b0e14;
+// Matches battle/colors.js's BOARD_TINT.gridCell -- the tone that actually
+// covers most of the battle board (its hexes are filled with this, not
+// BOARD_TINT.bg, which only shows through the thin gaps between them), so
+// reusing it here is what makes this scene read as "the same background
+// as battle" rather than the flat-black void the plain --bg value gave.
+const BG_COLOR = 0x111624;
 const RING_COLOR = 0x2a3350;
+const GRID_COLOR = 0x1d2438; // BOARD_TINT.gridLine
 const SHIP_HEIGHT_ABOVE_PLANE = 1.2;
 
 export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, maxZoom }) {
@@ -242,9 +248,54 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
     pickables.push(hit);
   }
 
+  // The "rubber sheet" spacetime-curvature grid: a flat reference grid
+  // across the ecliptic plane that dips toward -Y near each massive body
+  // (`wells`, [{x,z,rPx}]), Sun deepest -- the standard classroom gravity-
+  // well picture. Not a real general-relativity computation (there isn't
+  // one that maps cleanly onto a handful of orbit-plane bodies at this
+  // scale); `rPx`, the body's already-computed rendered radius, just
+  // stands in for "how much this body should dent the sheet" so bigger
+  // reads as heavier, same as the eye already expects from its size.
+  // Doubles as texture that keeps the scene from reading as a flat black
+  // void, same job battle's hex grid does for its own board.
+  function addSpacetimeGrid({ size, divisions, wells }) {
+    const half = size / 2;
+    const step = size / divisions;
+    const depthAt = (x, z) => {
+      let y = 0;
+      for (const w of wells) {
+        const dx = x - w.x, dz = z - w.z;
+        const falloff = Math.max(w.rPx * 6, 40);
+        const strength = w.rPx * 1.8;
+        y -= strength / (1 + (dx * dx + dz * dz) / (falloff * falloff));
+      }
+      return y;
+    };
+    const rows = [];
+    for (let i = 0; i <= divisions; i++) {
+      const z = -half + i * step;
+      const row = [];
+      for (let j = 0; j <= divisions; j++) {
+        const x = -half + j * step;
+        row.push(new THREE.Vector3(x, depthAt(x, z), z));
+      }
+      rows.push(row);
+    }
+    const pts = [];
+    for (let i = 0; i <= divisions; i++) {
+      for (let j = 0; j <= divisions; j++) {
+        if (j < divisions) pts.push(rows[i][j], rows[i][j + 1]);
+        if (i < divisions) pts.push(rows[i][j], rows[i + 1][j]);
+      }
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: GRID_COLOR, transparent: true, opacity: 0.45 });
+    objectGroup.add(new THREE.LineSegments(geo, mat));
+  }
+
   function rebuild(fn) {
     clearObjects();
-    fn({ addBody, addRing, addFleet, addAsteroidBelt });
+    fn({ addBody, addRing, addFleet, addAsteroidBelt, addSpacetimeGrid });
     renderFrame();
   }
 

@@ -198,6 +198,13 @@ const BATTLE_PROXIMITY_PX = 40;
 const BELT_PARTICLE_COUNT = 1200;
 const BELT_HEIGHT_PX = 5;
 
+// The "rubber sheet" spacetime grid drawn across the System view (see
+// addSpacetimeGrid in scene3d.js) -- world-unit cell size and how far past
+// the outermost body (Neptune, at ORBIT_MAX_PX) it extends, shared by the
+// 3D and 2D paths so both cover the same area at the same density.
+const GRID_CELL_PX = 30;
+const GRID_EXTENT_PX = ORBIT_MAX_PX + 80;
+
 // A fleet's world position uses the exact same log-distance scale as every
 // real body in this view, so "close" means close in the system,
 // consistently regardless of which two planets are involved.
@@ -224,6 +231,20 @@ function beltScreenPoints(layout, belt) {
     const rad = p.angleDeg * Math.PI / 180;
     return { x: r * Math.cos(rad), y: r * Math.sin(rad), heightFrac: p.heightJitter };
   });
+}
+
+// The bodies that dent the 3D spacetime grid (see addSpacetimeGrid in
+// scene3d.js) -- the Sun and planets, whose already-computed rendered
+// radius (rPx) stands in for "how heavy this looks". Moons are too small
+// to register at this scale and the belt isn't a single point mass, so
+// neither gets a well.
+function gravityWells(layout) {
+  const wells = [];
+  if (layout.center) wells.push({ x: 0, z: 0, rPx: layout.center.rPx });
+  for (const p of layout.planets) {
+    if (p.kind !== "belt") wells.push({ x: p.x, z: p.y, rPx: p.rPx });
+  }
+  return wells;
 }
 
 function closeEnoughForBattle(fleets) {
@@ -266,7 +287,12 @@ function renderSystem3D(entry, data) {
   const fleets = placeFleets(layout);
   const battleReady = closeEnoughForBattle(fleets);
 
-  scene.rebuild(({ addBody, addRing, addFleet, addAsteroidBelt }) => {
+  scene.rebuild(({ addBody, addRing, addFleet, addAsteroidBelt, addSpacetimeGrid }) => {
+    addSpacetimeGrid({
+      size: GRID_EXTENT_PX * 2,
+      divisions: Math.round((GRID_EXTENT_PX * 2) / GRID_CELL_PX),
+      wells: gravityWells(layout),
+    });
     if (layout.center) {
       addBody({ x: 0, z: 0, radius: layout.center.rPx, color: colorsFor(layout.center).fill, label: layout.center.label, data: layout.center, emissive: true });
     }
@@ -412,10 +438,29 @@ function renderSystem2D(entry, data) {
     return Math.min(Math.max(body.rPx * camera2d.zoom, 1.2), cap);
   };
 
-  ctx.fillStyle = BOARD_TINT.bg;
+  ctx.fillStyle = BOARD_TINT.gridCell;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(cx, cy);
+
+  // A flat reference grid -- the 2D fallback has no depth axis to show the
+  // 3D scene's gravity-well dips (see addSpacetimeGrid in scene3d.js), so
+  // this is just the same-spaced lines, undipped, echoing the battle
+  // board's own hex grid.
+  ctx.strokeStyle = BOARD_TINT.gridLine;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6;
+  for (let x = -GRID_EXTENT_PX; x <= GRID_EXTENT_PX; x += GRID_CELL_PX) {
+    const [x1, y1] = worldToScreen(camera2d, x, -GRID_EXTENT_PX);
+    const [x2, y2] = worldToScreen(camera2d, x, GRID_EXTENT_PX);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  for (let y = -GRID_EXTENT_PX; y <= GRID_EXTENT_PX; y += GRID_CELL_PX) {
+    const [x1, y1] = worldToScreen(camera2d, -GRID_EXTENT_PX, y);
+    const [x2, y2] = worldToScreen(camera2d, GRID_EXTENT_PX, y);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 
   const drawRing = (ringCx, ringCy, worldRadiusPx) => {
     const r = worldRadiusPx * camera2d.zoom;
