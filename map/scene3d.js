@@ -368,21 +368,6 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       controls.update();
       renderFrame();
     },
-    focusOn(x, z, zoom) {
-      controls.target.set(x, 0, z);
-      camera.zoom = Math.max(camera.zoom, zoom);
-      camera.updateProjectionMatrix();
-      controls.update();
-      renderFrame();
-    },
-    resetCamera() {
-      controls.target.set(0, 0, 0);
-      camera.position.copy(DEFAULT_CAM_POS);
-      camera.zoom = 1;
-      camera.updateProjectionMatrix();
-      controls.update();
-      renderFrame();
-    },
     // Arrow-key panning: move the camera and its orbit target together,
     // along the camera's own on-screen right/"up" directions flattened
     // onto the ground plane, so the keys always move the view the way

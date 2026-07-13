@@ -441,7 +441,6 @@ function renderUniverse(entry, data) {
 
 const LOCAL_MAX_PX = 22;
 const MIN_ZOOM = 1, MAX_ZOOM = 60;
-const FOCUS_ZOOM = 20;
 const KEY_ZOOM_FACTOR = 1.3;
 const KEY_PAN_PX = 60;
 // How close (in world units -- fixed regardless of the camera's current
@@ -490,6 +489,23 @@ function shipHexOffset(c, r) {
   return [(c + 0.5 * (r & 1)) * GRID_HEX_SIZE_PX * Math.sqrt(3), r * GRID_HEX_SIZE_PX * 1.5];
 }
 
+// The nearest actual grid-lattice vertex to an arbitrary continuous pixel
+// point. A fleet's anchor (its faction's real orbital position, converted
+// straight from km -- see placeShips) lands at an essentially arbitrary
+// pixel offset from the grid, the same "only the Sun is guaranteed to sit
+// on a lattice vertex" issue GRID_HEX_SIZE_PX's own comment describes for
+// planets. shipHexOffset's per-ship spacing is grid-exact by construction,
+// but adding it to an off-lattice anchor just carries that same
+// fractional remainder into every ship in the formation -- snapping the
+// anchor itself first is what actually puts the formation's hex cells on
+// the drawn grid, not merely spaced like it.
+function snapToHexGrid(x, y) {
+  const size = GRID_HEX_SIZE_PX;
+  const r = Math.round(y / (size * 1.5));
+  const c = Math.round(x / (size * Math.sqrt(3)) - 0.5 * (r & 1));
+  return shipHexOffset(c, r);
+}
+
 // Individual ship tokens, not one "12" blob per faction -- each ship sits
 // on its own hex cell (shipHexOffset), arranged in whatever formation
 // shape the faction has chosen in Formation Setup (the exact same
@@ -505,7 +521,7 @@ function placeShips(layout) {
     const distanceKm = Math.hypot(pos.xKm, pos.yKm);
     const angle = Math.atan2(pos.yKm, pos.xKm);
     const r = layout.dist.toPixel(distanceKm);
-    const anchorX = r * Math.cos(angle), anchorY = r * Math.sin(angle);
+    const [anchorX, anchorY] = snapToHexGrid(r * Math.cos(angle), r * Math.sin(angle));
     const { u, flag } = formationLayout(FLEET_FORMATIONS[faction], SHIPS_PER_FACTION);
     return u.map(([fwd, lat, df], i) => {
       const [dx, dy] = shipHexOffset(fwd, lat);
@@ -687,10 +703,9 @@ function renderSystem3D(entry, data) {
       return;
     }
 
-    if (hit?.kind === "star") { scene.resetCamera(); setHint(""); showBodyInfo(hit); return; }
+    if (hit?.kind === "star") { setHint(""); showBodyInfo(hit); return; }
     if (hit?.kind === "moon") { setHint(`${hit.label} — a moon of ${hit.parentLabel}.`); showBodyInfo(hit); return; }
     if (hit?.kind === "planet" || hit?.kind === "belt") {
-      scene.focusOn(hit.x, hit.y, FOCUS_ZOOM);
       setHint(hit.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
       showBodyInfo(hit);
       return;
@@ -939,10 +954,8 @@ function renderSystem2D(entry, data) {
     }
 
     if (hit?.kind === "star") {
-      camera2d.x = 0; camera2d.y = 0; camera2d.zoom = 1;
       setHint("");
       showBodyInfo(hit);
-      render();
       return;
     }
     if (hit?.kind === "moon") {
@@ -951,11 +964,8 @@ function renderSystem2D(entry, data) {
       return;
     }
     if (hit?.kind === "planet" || hit?.kind === "belt") {
-      camera2d.x = hit.x; camera2d.y = hit.y;
-      camera2d.zoom = clampZoom2d(Math.max(camera2d.zoom, FOCUS_ZOOM));
       setHint(hit.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
       showBodyInfo(hit);
-      render();
       return;
     }
     setHint("Empty space — nothing here.");
