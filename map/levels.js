@@ -212,33 +212,38 @@ const MOON_DISTANCE_RATIO = {
 };
 
 // The ~18 moons anyone's actually heard of get a genuine reference angle +
-// period sourced from JPL's "Planetary Satellite Mean Elements"
-// (ssd.jpl.nasa.gov/sats/elem, epoch 2000-01-01.5 TDB, mean anomaly) --
-// projected forward to "now" the same way the planets are. Triton's period
-// is negative: its orbit is retrograde. Everyone else (the ~150 minor/
-// irregular moons) gets moonOrbit()'s fallback below: a real period
-// (Kepler's third law from their real distance) but a synthetic phase,
-// since reliable reference-epoch data for that many small, often poorly-
+// period + inclination sourced from JPL's "Planetary Satellite Mean
+// Elements" (ssd.jpl.nasa.gov/sats/elem, epoch 2000-01-01.5 TDB, mean
+// anomaly) -- projected forward to "now" the same way the planets are.
+// Triton's period is negative: its orbit is retrograde. inclinationDeg is
+// relative to each moon's own local Laplace plane (Uranus's moons: Uranus's
+// equator; the Moon: the ecliptic) -- not the planet's orbital plane around
+// the Sun, which is what this map otherwise treats as "flat", so it's a
+// real but not perfectly apples-to-apples tilt; see layoutSystemWithMoons
+// in orbitmap.js for how it's actually applied. Everyone else (the ~150
+// minor/irregular moons) gets moonOrbit()'s fallback below: a real period
+// (Kepler's third law from their real distance) but a synthetic phase and
+// no inclination, since reliable data for that many small, often poorly-
 // constrained bodies isn't practically available -- see orbits.js's header.
 const MAJOR_MOON_ORBIT = {
-  moon:     { refAngleDeg: 135.27, periodDays: 27.322 },
-  phobos:   { refAngleDeg: 189.7,  periodDays: 0.3187 },
-  deimos:   { refAngleDeg: 205.0,  periodDays: 1.2625 },
-  io:       { refAngleDeg: 330.9,  periodDays: 1.762732 },
-  europa:   { refAngleDeg: 345.4,  periodDays: 3.525463 },
-  ganymede: { refAngleDeg: 324.8,  periodDays: 7.155588 },
-  callisto: { refAngleDeg: 87.4,   periodDays: 16.69044 },
-  tethys:   { refAngleDeg: 0.0,    periodDays: 1.887802 },
-  dione:    { refAngleDeg: 212.0,  periodDays: 2.736916 },
-  rhea:     { refAngleDeg: 31.5,   periodDays: 4.517503 },
-  titan:    { refAngleDeg: 11.7,   periodDays: 15.945448 },
-  iapetus:  { refAngleDeg: 74.8,   periodDays: 79.331002 },
-  ariel:    { refAngleDeg: 193.5,  periodDays: 2.520379 },
-  umbriel:  { refAngleDeg: 253.0,  periodDays: 4.144177 },
-  titania:  { refAngleDeg: 68.1,   periodDays: 8.705869 },
-  oberon:   { refAngleDeg: 143.6,  periodDays: 13.463237 },
-  miranda:  { refAngleDeg: 73.0,   periodDays: 1.413479 },
-  triton:   { refAngleDeg: 63.0,   periodDays: -5.876994 },
+  moon:     { refAngleDeg: 135.27, periodDays: 27.322,     inclinationDeg: 5.16 },
+  phobos:   { refAngleDeg: 189.7,  periodDays: 0.3187,     inclinationDeg: 1.1 },
+  deimos:   { refAngleDeg: 205.0,  periodDays: 1.2625,     inclinationDeg: 1.8 },
+  io:       { refAngleDeg: 330.9,  periodDays: 1.762732,   inclinationDeg: 0.0 },
+  europa:   { refAngleDeg: 345.4,  periodDays: 3.525463,   inclinationDeg: 0.5 },
+  ganymede: { refAngleDeg: 324.8,  periodDays: 7.155588,   inclinationDeg: 0.2 },
+  callisto: { refAngleDeg: 87.4,   periodDays: 16.69044,   inclinationDeg: 0.3 },
+  tethys:   { refAngleDeg: 0.0,    periodDays: 1.887802,   inclinationDeg: 1.1 },
+  dione:    { refAngleDeg: 212.0,  periodDays: 2.736916,   inclinationDeg: 0.0 },
+  rhea:     { refAngleDeg: 31.5,   periodDays: 4.517503,   inclinationDeg: 0.3 },
+  titan:    { refAngleDeg: 11.7,   periodDays: 15.945448,  inclinationDeg: 0.3 },
+  iapetus:  { refAngleDeg: 74.8,   periodDays: 79.331002,  inclinationDeg: 7.6 },
+  ariel:    { refAngleDeg: 193.5,  periodDays: 2.520379,   inclinationDeg: 0.0 },
+  umbriel:  { refAngleDeg: 253.0,  periodDays: 4.144177,   inclinationDeg: 0.1 },
+  titania:  { refAngleDeg: 68.1,   periodDays: 8.705869,   inclinationDeg: 0.1 },
+  oberon:   { refAngleDeg: 143.6,  periodDays: 13.463237,  inclinationDeg: 0.1 },
+  miranda:  { refAngleDeg: 73.0,   periodDays: 1.413479,   inclinationDeg: 4.4 },
+  triton:   { refAngleDeg: 63.0,   periodDays: -5.876994,  inclinationDeg: 157.3 },
 };
 
 function moonRadiusKm(id) {
@@ -260,7 +265,10 @@ function moonsOf(bodyId) {
   return (MOONS[bodyId] || []).map(name => {
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, "");
     const distanceKm = (MOON_DISTANCE_RATIO[id] || 10) * parentRadiusKm;
-    return { id, label: name, kind: "moon", radiusKm: moonRadiusKm(id), distanceKm, orbit: moonOrbit(id, bodyId, distanceKm) };
+    return {
+      id, label: name, kind: "moon", radiusKm: moonRadiusKm(id), distanceKm,
+      orbit: moonOrbit(id, bodyId, distanceKm), inclinationDeg: MAJOR_MOON_ORBIT[id]?.inclinationDeg,
+    };
   });
 }
 

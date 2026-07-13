@@ -142,9 +142,27 @@ export function layoutSystemWithMoons(data, { maxPixel = 420, localMaxPixel = 22
         const mRad = mAngleDeg * Math.PI / 180;
         const radialJitter = (hashAngleDeg(m.id + "-radial") / 360 - 0.5) * 8;
         const lr = clearance + localDist.toPixel(m.distanceKm) + radialJitter;
+        const localX = lr * Math.cos(mRad), localZ = lr * Math.sin(mRad);
+
+        // Real inclination (the ~18 major moons only -- see MAJOR_MOON_ORBIT
+        // in levels.js; minor moons have no reliable inclination data any
+        // more than they have a reliable reference angle) tilts a moon's
+        // orbital plane relative to the flat plane everything else sits on,
+        // rotated around the local X axis -- an arbitrary but fixed
+        // "ascending node" simplification, since real per-moon node data is
+        // out of scope here. Retrograde motion (only Triton among these) is
+        // already handled separately via a negative orbital period, so only
+        // the tilt MAGNITUDE (folding >90 degrees back down) feeds the
+        // geometry -- 3D and 2D consumers both still get x/y (flat, the 2D
+        // fallback's only concept of position); tiltHeight/tiltZ are the
+        // additional 3D-only, tilt-corrected height and depth.
+        const incDeg = m.inclinationDeg || 0;
+        const tiltDeg = incDeg > 90 ? 180 - incDeg : incDeg;
+        const tiltRad = tiltDeg * Math.PI / 180;
         return {
-          ...m, x: x + lr * Math.cos(mRad), y: y + lr * Math.sin(mRad),
-          rPx: size(m.radiusKm || 0), angleDeg: mAngleDeg,
+          ...m, x: x + localX, y: y + localZ,
+          tiltHeight: -localZ * Math.sin(tiltRad), tiltZ: y + localZ * Math.cos(tiltRad),
+          rPx: size(m.radiusKm || 0), angleDeg: mAngleDeg, inclinationDeg: tiltDeg,
           parentId: b.id, parentLabel: b.label, localRingPx: lr,
         };
       });

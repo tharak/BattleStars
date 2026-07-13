@@ -251,8 +251,8 @@ function renderSystem3D(entry, data) {
       addRing(0, 0, Math.hypot(p.x, p.y));
       addBody({ x: p.x, z: p.y, radius: p.rPx, color: colorsFor(p).fill, label: p.label, data: p });
       for (const m of p.moons) {
-        addRing(p.x, p.y, m.localRingPx);
-        addBody({ x: m.x, z: m.y, radius: m.rPx, color: colorsFor(m).fill, label: m.label, data: m });
+        addRing(p.x, p.y, m.localRingPx, m.inclinationDeg);
+        addBody({ x: m.x, y: m.tiltHeight, z: m.tiltZ, radius: m.rPx, color: colorsFor(m).fill, label: m.label, data: m });
       }
     }
     for (const f of fleets) {

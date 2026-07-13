@@ -120,15 +120,17 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
   }
 
   // A real body: the Sun, a planet, or a moon. `emissive` (the Sun) skips
-  // lighting -- it's the light source, not something lit by it.
-  function addBody({ x, z, radius, color, label, data, emissive }) {
+  // lighting -- it's the light source, not something lit by it. `y`
+  // (default 0, the shared orbital plane) is only ever nonzero for a major
+  // moon with real inclination -- see layoutSystemWithMoons in orbitmap.js.
+  function addBody({ x, y = 0, z, radius, color, label, data, emissive }) {
     const r = Math.max(radius, 0.5);
     const geo = new THREE.SphereGeometry(r, 22, 16);
     const mat = emissive
       ? new THREE.MeshBasicMaterial({ color })
       : new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0.05 });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, 0, z);
+    mesh.position.set(x, y, z);
     mesh.userData = data;
     objectGroup.add(mesh);
     if (label) {
@@ -141,12 +143,17 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
     return mesh;
   }
 
-  function addRing(cx, cz, radius) {
+  // `tiltDeg` (default 0, flat) draws the ring rotated around its own
+  // local X axis, matching a real-inclination moon's tilted orbital plane
+  // (see layoutSystemWithMoons in orbitmap.js) instead of always lying flat.
+  function addRing(cx, cz, radius, tiltDeg = 0) {
     if (radius < 1) return;
+    const tiltRad = tiltDeg * Math.PI / 180;
     const pts = [];
     for (let i = 0; i <= 72; i++) {
       const a = (i / 72) * Math.PI * 2;
-      pts.push(new THREE.Vector3(cx + Math.cos(a) * radius, 0.05, cz + Math.sin(a) * radius));
+      const localX = Math.cos(a) * radius, localZ = Math.sin(a) * radius;
+      pts.push(new THREE.Vector3(cx + localX, 0.05 - localZ * Math.sin(tiltRad), cz + localZ * Math.cos(tiltRad)));
     }
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
     const mat = new THREE.LineBasicMaterial({ color: RING_COLOR, transparent: true, opacity: 0.4 });
