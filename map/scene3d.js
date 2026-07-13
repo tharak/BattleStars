@@ -124,6 +124,57 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
     bodyLabels = [];
   }
 
+  // A procedurally-generated solar surface -- granulation-ish mottling
+  // plus a few brighter flare blobs, drawn once onto an offscreen canvas
+  // and reused as a texture for the rest of this scene's life (built
+  // lazily on first use, not eagerly at scene creation, since it's only
+  // ever needed once a System with a star actually renders). Deterministic
+  // (seeded, not Math.random()) so the pattern doesn't change every time
+  // addBody() runs again on a rebuild -- rebuild() fires on nearly every
+  // interaction (selecting a fleet, panning, ...), and disposing/
+  // regenerating a whole texture that often would be wasteful and would
+  // make the surface visibly swim.
+  let sunTexture = null;
+  function getSunTexture() {
+    if (sunTexture) return sunTexture;
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    let seed = 1337;
+    const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+    const grad = ctx.createLinearGradient(0, 0, 0, size);
+    grad.addColorStop(0, "#fff3c4");
+    grad.addColorStop(0.5, "#ffb347");
+    grad.addColorStop(1, "#ff7518");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    for (let i = 0; i < 260; i++) {
+      const x = rand() * size, y = rand() * size, r = 3 + rand() * 9;
+      const hue = 25 + rand() * 35, light = 50 + rand() * 35;
+      ctx.beginPath();
+      ctx.fillStyle = `hsla(${hue}, 100%, ${light}%, ${0.12 + rand() * 0.25})`;
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (let i = 0; i < 12; i++) {
+      const x = rand() * size, y = rand() * size, r = 10 + rand() * 22;
+      const flare = ctx.createRadialGradient(x, y, 0, x, y, r);
+      flare.addColorStop(0, "rgba(255,255,225,0.55)");
+      flare.addColorStop(1, "rgba(255,255,225,0)");
+      ctx.fillStyle = flare;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    sunTexture = new THREE.CanvasTexture(canvas);
+    sunTexture.wrapS = sunTexture.wrapT = THREE.RepeatWrapping;
+    sunTexture.colorSpace = THREE.SRGBColorSpace;
+    return sunTexture;
+  }
+
   function makeLabel(text) {
     const div = document.createElement("div");
     div.textContent = text;
@@ -135,14 +186,26 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
   }
 
   // A real body: the Sun, a planet, or a moon. `emissive` (the Sun) skips
-  // lighting -- it's the light source, not something lit by it. `y`
-  // (default 0, the shared orbital plane) is only ever nonzero for a major
-  // moon with real inclination -- see layoutSystemWithMoons in orbitmap.js.
+  // *lit* shading -- it's the light source, not something lit by it, and
+  // there's a PointLight sitting at this exact position (see above), so a
+  // normal lit material would see every point on the sphere facing away
+  // from its own light and render solid black. Driving the surface
+  // entirely through the emissive channel (base color/map left black)
+  // sidesteps that: emissive is a flat additive term Three.js applies
+  // regardless of any light or surface normal, so the textured surface
+  // reads the same brightness from every angle, same as the old flat
+  // MeshBasicMaterial did, but with real granulation detail now instead
+  // of a single flat color. `y` (default 0, the shared orbital plane) is
+  // only ever nonzero for a major moon with real inclination -- see
+  // layoutSystemWithMoons in orbitmap.js.
   function addBody({ x, y = 0, z, radius, color, label, data, emissive }) {
     const r = Math.max(radius, 0.5);
     const geo = new THREE.SphereGeometry(r, 22, 16);
     const mat = emissive
-      ? new THREE.MeshBasicMaterial({ color })
+      ? new THREE.MeshStandardMaterial({
+          color: 0x000000, emissive: color, emissiveMap: getSunTexture(), emissiveIntensity: 1.4,
+          roughness: 1, metalness: 0,
+        })
       : new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0.05 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, y, z);
