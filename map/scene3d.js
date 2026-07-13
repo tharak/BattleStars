@@ -69,7 +69,7 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
   labelContainer.appendChild(labelRenderer.domElement);
 
   scene.add(new THREE.AmbientLight(0x404050, 1.5));
-  scene.add(new THREE.PointLight(0xfff2cc, 3.5, 0, 0)); // at the origin -- the Sun lights everything else
+  scene.add(new THREE.PointLight(0xfff2cc, 8, 0, 0)); // at the origin -- the Sun lights everything else
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = false;
