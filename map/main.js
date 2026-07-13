@@ -208,6 +208,7 @@ const BELT_HEIGHT_PX = 5;
 // coarse to read as a curve.
 const GRID_CELL_PX = 20;
 const GRID_EXTENT_PX = ORBIT_MAX_PX + 80;
+const GRID_LINE_COLOR = "#39ff14"; // neon green -- matches scene3d.js's GRID_COLOR
 
 // A fleet's world position uses the exact same log-distance scale as every
 // real body in this view, so "close" means close in the system,
@@ -451,7 +452,7 @@ function renderSystem2D(entry, data) {
   // 3D scene's gravity-well dips (see addSpacetimeGrid in scene3d.js), so
   // this is just the same-spaced lines, undipped, echoing the battle
   // board's own hex grid.
-  ctx.strokeStyle = BOARD_TINT.gridLine;
+  ctx.strokeStyle = GRID_LINE_COLOR;
   ctx.lineWidth = 1.5;
   ctx.globalAlpha = 0.6;
   for (let x = -GRID_EXTENT_PX; x <= GRID_EXTENT_PX; x += GRID_CELL_PX) {

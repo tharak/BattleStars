@@ -44,7 +44,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 // as battle" rather than the flat-black void the plain --bg value gave.
 const BG_COLOR = 0x111624;
 const RING_COLOR = 0x2a3350;
-const GRID_COLOR = 0x1d2438; // BOARD_TINT.gridLine
+const GRID_COLOR = 0x39ff14; // neon green -- deliberately loud against BG_COLOR, unlike RING_COLOR
 const SHIP_HEIGHT_ABOVE_PLANE = 1.2;
 
 export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, maxZoom }) {
@@ -271,17 +271,17 @@ export function createSystemScene({ canvas, labelContainer, sizePx, minZoom, max
     const half = size / 2;
     const step = size / divisions;
     // falloff (how far the dip reaches) scales with the body's own radius
-    // but tightly -- the earlier 6x-radius falloff made the Sun's well
-    // ~200 units wide, wider than the gap to its nearest neighbor, so it
-    // read as one gentle citywide tilt instead of a crater around any one
-    // body. A ~2.5x-radius falloff keeps each well a legible, localized
-    // funnel instead of a slope you can't see the edge of.
+    // but tightly, and strength (how deep) is deliberately way past any
+    // real proportion -- this is a legibility exaggeration, not a
+    // to-scale one, the same call already made for planet/moon sizes
+    // elsewhere in this view. Un-exaggerated, the dip was too shallow and
+    // too wide to read as curvature at all.
     const depthAt = (x, z) => {
       let y = 0;
       for (const w of wells) {
         const dx = x - w.x, dz = z - w.z;
-        const falloff = Math.max(w.rPx * 2.5, 25);
-        const strength = w.rPx * 3.2;
+        const falloff = Math.max(w.rPx * 2, 20);
+        const strength = w.rPx * 9;
         y -= strength / (1 + (dx * dx + dz * dz) / (falloff * falloff));
       }
       return y;
