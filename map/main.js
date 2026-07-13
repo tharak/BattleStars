@@ -108,7 +108,7 @@ function infoFor(hit) {
   if (hit.kind === "star") return { name: hit.label, detail: "The star this system orbits." };
   if (hit.kind === "moon") return { name: hit.label, detail: `Moon of ${hit.parentLabel}.` };
   if (hit.kind === "planet") return { name: hit.label, detail: "Planet." };
-  if (hit.kind === "asteroid") return { name: "Asteroid", detail: "Blocks movement and line of sight." };
+  if (hit.kind === "asteroid") return { name: "Asteroid", detail: `Costs a full ${MP_MAX} MP to push through; still blocks line of sight.` };
   if (hit.kind === "ship") {
     return {
       name: `${SC.labelOf(world, hit.id)}${hit.isFlag ? " ★" : ""}`,
@@ -181,18 +181,29 @@ function moveResultHint(res) {
   if (res.reason === "shaken") setHint("Shaken — refuses to close the distance.");
   else if (res.reason === "blocked") setHint("Blocked — that hex is occupied.");
 }
+// A hex in the asteroid field doesn't block movement outright (see
+// shipCombat.js's stepInto -- only ship occupancy does), it just costs
+// the ship's whole MP budget to push through, same as moving backward
+// always does -- so entering one requires a full bank of MP up front,
+// checked here before the move is even attempted (shipCombat.js has no
+// concept of MP at all, that bookkeeping is entirely this file's own).
+function hexMoveCost(hex) {
+  return beltObstacles.has(hexKey(hex[0], hex[1])) ? MP_MAX : 1;
+}
 function doForward() {
   if (!SC.canMove(activation)) return;
-  const res = SC.moveForward(world, activation.u, beltObstacles);
+  const cost = hexMoveCost(SC.forwardHex(world, activation.u));
+  if (activation.mp < cost) { setHint("Not enough MP to push through the asteroid field."); renderInfoPanel(); return; }
+  const res = SC.moveForward(world, activation.u);
   if (!res.ok) { moveResultHint(res); renderInfoPanel(); return; }
-  activation.mp--; activation.moved = true; activation.fireMode = false;
+  activation.mp -= cost; activation.moved = true; activation.fireMode = false;
   setHint("");
   renderInfoPanel();
   render();
 }
 function doBackward() {
   if (!SC.canBack(activation)) return;
-  const res = SC.moveBackward(world, activation.u, beltObstacles);
+  const res = SC.moveBackward(world, activation.u);
   if (!res.ok) { moveResultHint(res); renderInfoPanel(); return; }
   activation.mp = 0; activation.moved = true; activation.fireMode = false;
   setHint("");
@@ -299,11 +310,11 @@ function levelData(entry) {
 }
 
 const FILL = {
-  system: "#3a2f6a", star: "#5a4a1a", planet: "#1a3a5c", belt: "#2a2a2a",
+  system: "#3a2f6a", star: "#5a4a1a", planet: "#1a3a5c", belt: "#b58a5c",
   "body-center": "#5a4a1a", moon: "#2e3644",
 };
 const STROKE = {
-  system: "#a78bfa", star: "#ffd166", planet: "#4a9eff", belt: "#666",
+  system: "#a78bfa", star: "#ffd166", planet: "#4a9eff", belt: "#e0b98a",
   "body-center": "#ffd166", moon: "#9fb3c8",
 };
 
@@ -457,10 +468,12 @@ const KEY_ZOOM_FACTOR = 1.3;
 const KEY_PAN_PX = 60;
 // The asteroid belt is real terrain, not decoration: every hex cell inside
 // its actual 2.1-3.3 AU ring (see beltAsteroidHexes below) either holds a
-// single "1-hex asteroid" that blocks movement and line of sight, or is
-// empty. Two fixed angular wedges are kept permanently clear -- corridors
-// through the field, LOTGH's Iserlohn/Fezzan corridors being the
-// reference: the belt is otherwise dense enough to matter, but these two
+// single "1-hex asteroid" -- costs a ship's whole MP budget to push into
+// (see hexMoveCost) and still blocks line of sight, but doesn't block
+// movement outright the way another ship does -- or is empty. Two fixed
+// angular wedges are kept permanently clear -- corridors through the
+// field, LOTGH's Iserlohn/Fezzan corridors being the reference: the belt
+// is otherwise dense enough to matter, but these two
 // lanes are the only reliable way through, so controlling them is the
 // actual tactical prize.
 const BELT_ASTEROID_FILL = 0.5;
@@ -738,7 +751,7 @@ function renderSystem3D(entry, data) {
         const asteroids = beltAsteroidHexes(layout, p);
         updateBeltObstacles(asteroids);
         for (const a of asteroids) {
-          addAsteroid({ x: a.x, z: a.y, radius: BELT_ASTEROID_RADIUS_PX, data: a });
+          addAsteroid({ x: a.x, z: a.y, radius: BELT_ASTEROID_RADIUS_PX, colorHex: FILL.belt, data: a });
         }
         continue;
       }
@@ -769,7 +782,7 @@ function renderSystem3D(entry, data) {
 
     if (hit?.kind === "star") { setHint(""); showBodyInfo(hit); return; }
     if (hit?.kind === "moon") { setHint(`${hit.label} — a moon of ${hit.parentLabel}.`); showBodyInfo(hit); return; }
-    if (hit?.kind === "asteroid") { setHint("Asteroid — blocks movement and line of sight."); showBodyInfo(hit); return; }
+    if (hit?.kind === "asteroid") { setHint(`Asteroid — costs ${MP_MAX} MP to push through, blocks line of sight.`); showBodyInfo(hit); return; }
     if (hit?.kind === "planet") { setHint(""); showBodyInfo(hit); return; }
     setHint("Empty space — nothing here.");
     showBodyInfo(null);
@@ -1029,7 +1042,7 @@ function renderSystem2D(entry, data) {
       return;
     }
     if (hit?.kind === "asteroid") {
-      setHint("Asteroid — blocks movement and line of sight.");
+      setHint(`Asteroid — costs ${MP_MAX} MP to push through, blocks line of sight.`);
       showBodyInfo(hit);
       return;
     }

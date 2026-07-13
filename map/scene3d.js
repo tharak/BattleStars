@@ -291,9 +291,9 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   // irregular low-poly rock (an icosahedron with each vertex nudged by a
   // small amount, deterministically seeded from its own world position so
   // the same asteroid looks the same on every rebuild()) rather than a
-  // perfect gem, colored to match the belt's existing dark palette
-  // (FILL.belt/STROKE.belt in map/main.js).
-  function addAsteroid({ x, z, radius, data }) {
+  // perfect gem, colored by the caller (map/main.js's FILL.belt) same as
+  // every other body here.
+  function addAsteroid({ x, z, radius, colorHex, data }) {
     const geo = new THREE.IcosahedronGeometry(radius, 0);
     let seed = Math.abs(Math.round(x * 131 + z * 977)) || 1;
     const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -303,7 +303,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       pos.setXYZ(i, pos.getX(i) * jitter, pos.getY(i) * jitter, pos.getZ(i) * jitter);
     }
     geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 1, flatShading: true });
+    const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 1, flatShading: true });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, SHIP_BASE_Y + radius * 0.6, z);
     mesh.rotation.set(rand() * Math.PI * 2, rand() * Math.PI * 2, rand() * Math.PI * 2);

@@ -123,14 +123,26 @@ export function turn(world, e, dir) {
   const facing = world.get(e, C.Facing);
   facing.dir = (facing.dir + dir + 6) % 6;
 }
+// The hex a forward/backward step would land on, without moving anything
+// -- lets the caller (map/main.js) check terrain cost/legality up front,
+// e.g. "can this ship actually afford to push into that asteroid hex"
+// before committing to the move.
+export const forwardHex = (world, e) => neighbor(posOf(world, e), facingOf(world, e));
+export const backwardHex = (world, e) => neighbor(posOf(world, e), (facingOf(world, e) + 3) % 6);
+
 // Both return {ok:true} or {ok:false, reason:"blocked"|"shaken"} -- the
 // caller (map/main.js) turns `reason` into hint text; neither mutates MP,
 // that's the caller's own activation bookkeeping (mirroring how
 // turnEngine.js's doForward/doBackward, not systems.js, own `act.mp`).
-function stepInto(world, e, dir, extraObstacles) {
+// Only *ship* occupancy blocks a move outright -- unlike legalTargets'
+// LOS check, terrain (the asteroid field) never makes a hex unenterable
+// here, it just costs more MP, which is the caller's own bookkeeping to
+// enforce before ever calling this (see beltObstacles/doForward in
+// map/main.js).
+function stepInto(world, e, dir) {
   const pos = posOf(world, e);
   const nx = neighbor(pos, dir);
-  if (occupiedSet(world, extraObstacles).has(key(nx[0], nx[1]))) return { ok: false, reason: "blocked" };
+  if (occupiedSet(world).has(key(nx[0], nx[1]))) return { ok: false, reason: "blocked" };
   if (moraleOf(world, e) === MoraleState.SHAKEN) {
     const ne = nearestEnemy(world, e);
     if (ne && hexDist(nx, posOf(world, ne)) < hexDist(pos, posOf(world, ne))) return { ok: false, reason: "shaken" };
@@ -138,8 +150,8 @@ function stepInto(world, e, dir, extraObstacles) {
   setPos(world, e, nx);
   return { ok: true };
 }
-export const moveForward = (world, e, extraObstacles) => stepInto(world, e, facingOf(world, e), extraObstacles);
-export const moveBackward = (world, e, extraObstacles) => stepInto(world, e, (facingOf(world, e) + 3) % 6, extraObstacles);
+export const moveForward = (world, e) => stepInto(world, e, facingOf(world, e));
+export const moveBackward = (world, e) => stepInto(world, e, (facingOf(world, e) + 3) % 6);
 
 // --- morale / destruction (battle/systems.js:17-54, supply/flagLost/
 // forced-rout-facing dropped per the file header's scope cuts) -----------
