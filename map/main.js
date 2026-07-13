@@ -158,6 +158,16 @@ let selectedFleet = null;
 // selectedFleet whenever a fleet is picked up (checked first in
 // renderInfoPanel), so this only ever matters while nothing's selected.
 let lastClickedInfo = null;
+// Whatever's currently under the cursor at the System level (see
+// showHoverInfo) -- takes priority over lastClickedInfo but not over an
+// actively-selected fleet's own controls (checked first in
+// renderInfoPanel), so hovering some other body while mid-move doesn't
+// blow away the "click a destination" controls. hoverId is the last
+// hovered body/ship's own `.id` (stable per body -- see levels.js/
+// placeShips), used purely to skip re-rendering the panel on every single
+// mousemove pixel while still hovering the same thing.
+let hoverInfo = null;
+let hoverId = null;
 
 initFleetPositions();
 
@@ -173,6 +183,12 @@ function infoFor(hit) {
   if (hit.kind === "moon") return { name: hit.label, detail: `Moon of ${hit.parentLabel}.` };
   if (hit.kind === "belt") return { name: hit.label, detail: "Asteroid belt — no individual bodies to explore." };
   if (hit.kind === "planet") return { name: hit.label, detail: "Planet." };
+  if (hit.kind === "ship") {
+    return {
+      name: `${FACTIONS[hit.faction].label} Fleet`,
+      detail: hit.isFlag ? "Flagship." : `Ship ${hit.label} of ${SHIPS_PER_FACTION}.`,
+    };
+  }
   return null;
 }
 // Puts whatever was just clicked into the info panel. Shared by both the
@@ -181,6 +197,18 @@ function infoFor(hit) {
 // genuinely differ per render path), but the panel update itself doesn't.
 function showBodyInfo(hit) {
   lastClickedInfo = infoFor(hit);
+  renderInfoPanel();
+}
+// Live-updates the panel to whatever's under the cursor, without touching
+// lastClickedInfo/selectedFleet -- moving off every body reverts the panel
+// to whatever a click last put there (or the empty placeholder), the same
+// way a click's own result behaves once the cursor stops hovering anything.
+// Shared by both the 3D and 2D mousemove handlers.
+function showHoverInfo(hit) {
+  const id = hit?.id ?? null;
+  if (id === hoverId) return;
+  hoverId = id;
+  hoverInfo = infoFor(hit);
   renderInfoPanel();
 }
 // Selecting, deselecting, and moving a fleet do exactly the same thing
@@ -234,11 +262,12 @@ function renderInfoPanel() {
     renderFormationButtons(selectedFleet);
     return;
   }
-  if (lastClickedInfo) {
+  const shown = hoverInfo || lastClickedInfo;
+  if (shown) {
     infoEmpty.style.display = "none";
     infoBody.style.display = "block";
-    infoName.textContent = lastClickedInfo.name;
-    infoDetail.textContent = lastClickedInfo.detail;
+    infoName.textContent = shown.name;
+    infoDetail.textContent = shown.detail;
     infoControls.style.display = "none";
     return;
   }
@@ -647,6 +676,14 @@ function renderSystem3D(entry, data) {
     showBodyInfo(null);
   };
 
+  canvas3d.onmousemove = ev => {
+    // Skip during an active rotate/pan drag -- same reasoning as the 2D
+    // path's dragState guard, using OrbitControls' own drag flag instead.
+    if (sceneDragging) return;
+    showHoverInfo(scene.pick(ev.clientX, ev.clientY));
+  };
+  canvas3d.onmouseleave = () => showHoverInfo(null);
+
   wireBattleButton(battlePair);
 
   renderInfoPanel();
@@ -828,30 +865,40 @@ function renderSystem2D(entry, data) {
   canvas.oncontextmenu = ev => ev.preventDefault();
   canvas.style.cursor = "grab";
 
-  canvas.onclick = ev => {
-    if (justDragged) { justDragged = false; return; }
-    const rect = canvas.getBoundingClientRect();
-    const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
-
-    const screenPos = b => worldToScreen(camera2d, b.x, b.y);
+  // Whatever body/ship sits under a given screen point, in the same
+  // priority a click resolves it in (ship > star > moon > planet/belt) --
+  // shared by onclick and onmousemove (hover) so they can't drift apart.
+  function hitAt(x, y) {
     const within = b => {
       if (b.kind === "belt") {
-        // The belt is a scattered band, not one point -- clicking anywhere
-        // across its real inner/outer radius should hit it, not just the
-        // single representative point everything else uses for its target.
+        // The belt is a scattered band, not one point -- clicking/hovering
+        // anywhere across its real inner/outer radius should hit it, not
+        // just the single representative point everything else uses for
+        // its target.
         const [sunSx, sunSy] = worldToScreen(camera2d, 0, 0);
         const distFromSun = Math.hypot(x - sunSx, y - sunSy);
         const innerR = layout.dist.toPixel(b.beltInnerAU * AU_KM) * camera2d.zoom;
         const outerR = layout.dist.toPixel(b.beltOuterAU * AU_KM) * camera2d.zoom;
         return distFromSun >= innerR - 6 && distFromSun <= outerR + 6;
       }
-      const [sx, sy] = screenPos(b);
+      const [sx, sy] = worldToScreen(camera2d, b.x, b.y);
       const tap = b.kind === "ship" ? b.hitRPx : Math.max(screenRadius(b), 10);
       return Math.hypot(x - sx, y - sy) <= tap;
     };
+    return ships.find(within)
+      || (layout.center && within(layout.center) ? layout.center : null)
+      || layout.planets.flatMap(p => p.moons).find(within)
+      || layout.planets.find(within)
+      || null;
+  }
 
-    const hitShip = ships.find(within);
-    if (hitShip) { selectOrDeselectFleet(hitShip.faction); return; }
+  canvas.onclick = ev => {
+    if (justDragged) { justDragged = false; return; }
+    const rect = canvas.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
+    const hit = hitAt(x, y);
+
+    if (hit?.kind === "ship") { selectOrDeselectFleet(hit.faction); return; }
 
     if (selectedFleet) {
       const [wx, wy] = screenToWorld(camera2d, x, y);
@@ -859,31 +906,41 @@ function renderSystem2D(entry, data) {
       return;
     }
 
-    if (layout.center && within(layout.center)) {
+    if (hit?.kind === "star") {
       camera2d.x = 0; camera2d.y = 0; camera2d.zoom = 1;
       setHint("");
-      showBodyInfo(layout.center);
+      showBodyInfo(hit);
       render();
       return;
     }
-    const hitMoon = layout.planets.flatMap(p => p.moons).find(within);
-    if (hitMoon) {
-      setHint(`${hitMoon.label} — a moon of ${hitMoon.parentLabel}.`);
-      showBodyInfo(hitMoon);
+    if (hit?.kind === "moon") {
+      setHint(`${hit.label} — a moon of ${hit.parentLabel}.`);
+      showBodyInfo(hit);
       return;
     }
-    const hitPlanet = layout.planets.find(within);
-    if (hitPlanet) {
-      camera2d.x = hitPlanet.x; camera2d.y = hitPlanet.y;
+    if (hit?.kind === "planet" || hit?.kind === "belt") {
+      camera2d.x = hit.x; camera2d.y = hit.y;
       camera2d.zoom = clampZoom2d(Math.max(camera2d.zoom, FOCUS_ZOOM));
-      setHint(hitPlanet.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
-      showBodyInfo(hitPlanet);
+      setHint(hit.kind === "belt" ? "Asteroid Belt — no bodies to explore." : "");
+      showBodyInfo(hit);
       render();
       return;
     }
     setHint("Empty space — nothing here.");
     showBodyInfo(null);
   };
+
+  canvas.onmousemove = ev => {
+    // A right-drag pan already floods window "mousemove" (see the module-
+    // scope listener above); skip hover lookups while one's in progress,
+    // both because the cursor isn't meaningfully "over" anything mid-pan
+    // and to avoid doing a hit-test on every dragged pixel.
+    if (dragState) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) - cx, y = (ev.clientY - rect.top) - cy;
+    showHoverInfo(hitAt(x, y));
+  };
+  canvas.onmouseleave = () => showHoverInfo(null);
 
   canvas.onwheel = ev => {
     ev.preventDefault();
