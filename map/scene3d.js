@@ -387,11 +387,21 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   return {
     rebuild,
     renderFrame,
-    // Whatever real body/fleet is under the cursor, or null.
+    // Whatever real body/fleet is under the cursor, or null. A ship always
+    // wins over anything else the ray also hit -- chiefly the asteroid
+    // belt's own invisible hit-torus, which spans a full ring around the
+    // Sun at Y=0 and can end up spatially coincident with a ship that's
+    // been moved into that radius band (via Set Course, say). Plain
+    // nearest-surface order has no notion of "which pickable matters
+    // more here", so without this a ship sitting on/near the belt was
+    // unclickable -- the belt's own invisible ring, being the nearer
+    // surface along that particular ray, ate the click first.
     pick(clientX, clientY) {
       raycaster.setFromCamera(ndcFromEvent(clientX, clientY), camera);
       const hits = raycaster.intersectObjects(pickables, true);
-      return hits.length ? resolveHit(hits[0].object) : null;
+      if (!hits.length) return null;
+      const shipHit = hits.find(h => resolveHit(h.object)?.kind === "ship");
+      return resolveHit((shipHit || hits[0]).object);
     },
     // Where the cursor's ray crosses the orbital (Y=0) plane, in the same
     // world x/z units everything else uses -- e.g. for fleet movement.
