@@ -5,7 +5,7 @@
 // hit-tests clicks against them. Used for the Universe/System/Body maps;
 // Formation Setup and Battle stay hex-based and keep using hexgrid.js.
 
-import { angleAtDeg, makeDistanceScale, makeSizeScale } from "./orbits.js";
+import { angleAtDeg, makeDistanceScale, makeSizeScale, hashAngleDeg } from "./orbits.js";
 
 export function layoutOrbitalBoard(data, { maxPixel = 420, nowMs = Date.now(), extraBodies = [] } = {}) {
   const centerRadiusKm = data.center?.radiusKm || 0;
@@ -112,10 +112,36 @@ export function layoutSystemWithMoons(data, { maxPixel = 420, localMaxPixel = 22
     if (moons.length) {
       const localMaxDistanceKm = Math.max(1, ...moons.map(m => m.distanceKm));
       const localDist = makeDistanceScale(localMaxDistanceKm, localMaxPixel, Math.max(1, b.radiusKm || 1));
+      // localDist is computed purely from real km ratios, with no idea how
+      // big the planet actually renders (rPx, from the Sun-anchored size
+      // scale above -- a wholly separate scale). Nothing otherwise stops a
+      // real close-orbiting moon (Jupiter's Metis, Saturn's Pan, ...) from
+      // landing inside the planet's own sphere once rPx is large enough
+      // relative to localMaxPixel, which is exactly what happened for
+      // every gas giant's innermost moons. Offsetting every moon's
+      // distance by the planet's own radius plus a fixed clearance
+      // guarantees a moon can never render inside its planet, regardless
+      // of how big that planet is.
+      const clearance = rPx + 4;
       placedMoons = moons.map(m => {
-        const mAngleDeg = m.orbit ? angleAtDeg(nowMs, m.orbit) : 0;
+        // Real distances genuinely cluster close together for several of a
+        // planet's minor moons, and a minor moon's angle is itself a
+        // synthetic hash (see levels.js) -- together those can coincidentally
+        // put two unrelated moons at nearly the same final spot (checked
+        // across the whole system: 27 pairs of moon spheres visibly
+        // touching, before this). Small deterministic jitter in both
+        // distance and angle, each keyed independently of the real angle
+        // hash, spreads most of that apart (down to ~8 pairs) without
+        // moving anything far enough to reorder real moons by distance or
+        // meaningfully misrepresent a real major moon's position -- pushing
+        // the jitter range further starts trading that accuracy for
+        // diminishing returns, since a few of the remaining pairs are
+        // minor moons that are also genuinely close in real distance.
+        const angleJitter = (hashAngleDeg(m.id + "-angle") / 360 - 0.5) * 8;
+        const mAngleDeg = (m.orbit ? angleAtDeg(nowMs, m.orbit) : 0) + angleJitter;
         const mRad = mAngleDeg * Math.PI / 180;
-        const lr = localDist.toPixel(m.distanceKm);
+        const radialJitter = (hashAngleDeg(m.id + "-radial") / 360 - 0.5) * 8;
+        const lr = clearance + localDist.toPixel(m.distanceKm) + radialJitter;
         return {
           ...m, x: x + lr * Math.cos(mRad), y: y + lr * Math.sin(mRad),
           rPx: size(m.radiusKm || 0), angleDeg: mAngleDeg,
