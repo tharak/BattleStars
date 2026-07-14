@@ -9,11 +9,11 @@ import {
   FLEET_FORMATIONS, FACTIONS, SHIPS_PER_FACTION,
   FLEET_POSITIONS, initFleetPositions,
 } from "./levels.js";
-import { DIR_ANGLE, hexEdgeWidths, hexCorners, key as hexKey } from "../battle/hexmath.js";
+import { DIR_ANGLE, hexCorners, key as hexKey } from "../battle/hexmath.js";
 import { formationLayout } from "../battle/formations.js";
-import { BOARD_TINT } from "../battle/colors.js";
+import { BOARD_TINT, ACCENT } from "../battle/colors.js";
 import { MP_MAX, STATE_NAME } from "../battle/config.js";
-import * as SC from "./shipCombat.js";
+import * as SC from "../battle/core/shipRules.js";
 
 const canvas = document.getElementById("starmapCv");
 const mapwrap = document.getElementById("mapwrap");
@@ -50,7 +50,7 @@ let path = [
 ];
 
 // The one shared ECS world every ship on the map lives in (see
-// shipCombat.js) -- spawned once at startup (spawnInitialShips) from each
+// shipRules.js) -- spawned once at startup (spawnInitialShips) from each
 // faction's formation, then persistent: a ship's position/facing/strength/
 // morale only change via player commands (turn/forward/back/fire/Set
 // Course) from here on, never recomputed from the formation again.
@@ -60,7 +60,7 @@ const random = new SC.MathRandomSource();
 // the System level, plus its in-progress activation -- mirrors
 // battle/state.js's `act` shape ({u,mp,moved,fired,fireMode,cmd}) but
 // owned here directly rather than through a shared battle State, since
-// there's no turn order to hand off to (see shipCombat.js's header for
+// there's no turn order to hand off to (see shipRules.js's header for
 // why). travelArmed is Set-Course's own "next click is a destination"
 // flag, armed by the Travel button and consumed by the next click.
 let selectedShip = null;
@@ -73,10 +73,10 @@ let travelArmed = false;
 const effects = [];
 // The asteroid field's current hexes (a Set of "c,r" keys, see
 // battle/hexmath.js's key()) -- recomputed every render (updateBeltObstacles)
-// alongside the belt's own asteroid list. Passed into shipCombat.js's
+// alongside the belt's own asteroid list. Passed into shipRules.js's
 // legalTargets/canFire as extraObstacles (asteroids still block line of
 // sight); movement cost is this file's own concern (see hexMoveCost), not
-// shipCombat.js's. Read by the command functions below (doForward,
+// shipRules.js's. Read by the command functions below (doForward,
 // doFireAt, ...), which live outside any single render, hence
 // module-level rather than a render-local const.
 let beltObstacles = new Set();
@@ -147,7 +147,7 @@ function showHoverInfo(hit) {
 // battle/turnEngine.js:selectUnit) -- there's no "un-activated" gating
 // like battle's own selectUnit checks (Q.isActivated), since there's no
 // turn order here: any living ship, any faction, can be picked up at any
-// time (see shipCombat.js's header for why).
+// time (see shipRules.js's header for why).
 function selectShip(e) {
   selectedShip = e;
   activation = { u: e, mp: MP_MAX, moved: false, fired: false, fireMode: false, cmd: SC.inCommand(world, e) };
@@ -194,7 +194,7 @@ function moveResultHint(res) {
 // with hexExtraCost's terrain math untouched either way.
 const MOVE_BASE_COST = 1;
 // Neither the asteroid field nor a gravity well blocks movement outright
-// (see shipCombat.js's stepInto -- only ship occupancy did, and that's
+// (see shipRules.js's stepInto -- only ship occupancy did, and that's
 // gone too); they just add to a ship's MP budget to push through -- an
 // asteroid hex demands the rest of a full tank, a gravity well an
 // uncapped extra that grows the closer/deeper in a hex sits (see
@@ -415,7 +415,7 @@ const textureFor = cell => BODY_TEXTURES[cell.id];
 
 // Faction fleet/ship colors (see FACTIONS in levels.js) -- checked via
 // cell.faction rather than cell.id, since a ship's id is its own ECS
-// entity number (see shipCombat.js), not a shared small id space like
+// entity number (see shipRules.js), not a shared small id space like
 // planets/moons. Neon rather than the muted tones everything else uses:
 // each ship is a single small icon on its own hex cell (see
 // shipsSnapshot), and a small icon needs to read as a bright dot from
@@ -899,7 +899,7 @@ function renderSystem3D(entry, data) {
     for (const s of ships) {
       addShip({
         x: s.x, z: s.y, colorHex: colorsFor(s).fill, data: s,
-        selected: s.id === selectedShip, facingDeg: s.facingDeg,
+        selected: s.id === selectedShip, facingDeg: s.facingDeg, isFlag: s.isFlag,
       });
     }
     // A shot's tracer -- read once here and cleared right after (see the
@@ -1068,13 +1068,27 @@ function renderSystem2D(entry, data) {
     ctx.stroke();
     return [sx, sy, rPx];
   };
+  // battle/hexmath.js's facingArrowPoints is tuned for battle's fixed
+  // HS=17 board (fixed -4/-11px offsets, not proportional to hs) --
+  // wrong at the map's much smaller, zoom-varying ship icon sizes
+  // (s as low as 1.5px would invert the arrow). Same triangle shape,
+  // scaled proportionally to s instead: ratios match facingArrowPoints'
+  // own proportions at HS=17 ((17-4)/17 tip, (17-11)/17 base).
+  const shipArrowPoints = (x, y, s, angleDeg) => {
+    const a = angleDeg * Math.PI / 180;
+    return [
+      [x + Math.cos(a) * s * 0.765, y + Math.sin(a) * s * 0.765],
+      [x + Math.cos(a + 2.6) * s * 0.353, y + Math.sin(a + 2.6) * s * 0.353],
+      [x + Math.cos(a - 2.6) * s * 0.353, y + Math.sin(a - 2.6) * s * 0.353],
+    ];
+  };
   // One ship, one small hex on its own hex cell (see shipsSnapshot) -- filled
   // translucent (SHIP_FILL_ALPHA) in the faction color so a tightly-packed
   // formation still reads as individual ships rather than one solid blob.
-  // Facing shows as edge thickness, not a separate arrow: the single edge
-  // pointing the ship's real formation-assigned facing is thickest (best-
-  // armored side), the opposite edge thinnest (most vulnerable), the 4
-  // side edges in between -- see hexEdgeWidths in battle/hexmath.js.
+  // Facing is a filled arrow and the flagship gets a "★", same glyph
+  // language as battle/render.js's own unit drawing (ACCENT.flagshipArrow)
+  // -- labels/strength pips aren't duplicated here, that detail already
+  // lives in the info panel.
   const drawShip = (ship, selected) => {
     const [sx, sy] = worldToScreen(camera2d, ship.x, ship.y);
     const s = Math.min(Math.max(SHIP_ICON_BASE_PX * camera2d.zoom, 1.5), 10);
@@ -1087,16 +1101,21 @@ function renderSystem2D(entry, data) {
     ctx.closePath();
     ctx.fillStyle = hexToRgba(colors.fill, SHIP_FILL_ALPHA);
     ctx.fill();
-
-    const widths = hexEdgeWidths(ship.facingDeg);
+    ctx.lineWidth = selected ? 2 : 1;
     ctx.strokeStyle = selected ? "#ffffff" : colors.stroke;
-    for (let k = 0; k < 6; k++) {
-      const [x1, y1] = corners[k], [x2, y2] = corners[(k + 1) % 6];
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.lineWidth = selected ? widths[k] + 1 : widths[k];
-      ctx.stroke();
+    ctx.stroke();
+
+    const [tip, base1, base2] = shipArrowPoints(sx, sy, s, ship.facingDeg);
+    ctx.beginPath();
+    ctx.moveTo(...tip); ctx.lineTo(...base1); ctx.lineTo(...base2);
+    ctx.closePath();
+    ctx.fillStyle = ship.isFlag ? ACCENT.flagshipArrow : ACCENT.labelText;
+    ctx.fill();
+    if (ship.isFlag && s >= 4) {
+      ctx.fillStyle = ACCENT.labelText;
+      ctx.font = "bold 9px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText("★", sx, sy + 3);
     }
     return tapRadius;
   };

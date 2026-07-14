@@ -1,83 +1,116 @@
 // Every mutating gameplay system. This module is deliberately headless: it
 // changes domain state and emits semantic events, but never touches the DOM,
 // visual effects, audio, or clocks.
-import { hexDist, neighbor, angleBetween, argmin, range, DIR_ANGLE, key, incomingArc } from "./hexmath.js";
+//
+// The actual movement/fire/morale *rules* now live in
+// battle/core/shipRules.js (shared with the star map, see that file's
+// header) -- everything below is this screen's own adapter layer: it
+// supplies the 2-side/roster/supply/turn-order state shipRules.js has no
+// concept of (via the hooks each shipRules function takes), and translates
+// results into this screen's BattleEvent stream. AI behavior
+// (aiActivate/aiStep/flee/routedActivation) and pure facing helpers
+// (turnToward/desiredDir) have no star-map equivalent (it has no AI), so
+// they're untouched, still living here directly.
+import { hexDist, neighbor, angleBetween, argmin, range, DIR_ANGLE, key } from "./hexmath.js";
 import { RANGE, MP_MAX, HOLD_FORMS, MoraleState, inBounds } from "./config.js";
 import { BattleEvent } from "./core/events.js";
 import * as C from "./components.js";
 import * as Q from "./queries.js";
+import * as SR from "./core/shipRules.js";
 
-const { STEADY, SHAKEN, ROUTED } = MoraleState;
+const { SHAKEN, ROUTED } = MoraleState;
 const setPos = (state, e, pos) => { const p = state.world.get(e, C.Position); p.c = pos[0]; p.r = pos[1]; };
+
+// This side's fleet-wide morale penalty (supply/flagship loss) -- the
+// `extraModifier` shipRules.js's moraleCheck has no concept of. Safe to
+// compute once per call site: every unit a single moraleCheck/contagion/
+// destroy/fire invocation can reach (the checked unit itself, then its
+// same-faction contagion cascade) shares one fleet, so this never needs
+// re-deriving per recursion step.
+const fleetMoraleModifier = (state, side) =>
+  (state.G.fleets[side].supply !== "ok" ? -1 : 0) + (state.G.fleets[side].flagLost ? -1 : 0);
+
+// {onChecked, onRouted} for shipRules.js's moraleCheck/contagion/destroy/
+// fire -- entity-derived (via Q.sideOf(state, e/v)), so one instance
+// covers every unit a cascade touches regardless of whose morale started
+// it. Emits BattleEvent.MORALE_CHECKED for every check performed
+// (matching shipRules' onChecked firing right after each roll, before
+// any state mutation) and BattleEvent.UNIT_ROUTED + forces facing the
+// moment a unit newly routs (matching onRouted firing before that unit's
+// own contagion cascade) -- both in the same relative order the
+// pre-extraction code emitted them in.
+function moraleHooks(state) {
+  return {
+    onChecked: (e, r) => {
+      const side = Q.sideOf(state, e);
+      const why = [
+        r.supportBonus && "+1 support", r.commandBonus && "+1 command", r.flankPenalty && "−1 flanked",
+        state.G.fleets[side].supply !== "ok" && "−1 supply", state.G.fleets[side].flagLost && "−1 flagship",
+      ].filter(Boolean);
+      state.events.emit(BattleEvent.MORALE_CHECKED, {
+        unit: e, label: Q.labelOf(state, e), roll: r.roll, modifier: r.total - r.roll,
+        modifiers: why, total: r.total, passed: r.passed,
+      });
+    },
+    onRouted: e => {
+      const side = Q.sideOf(state, e);
+      state.world.get(e, C.Facing).dir = side === 0 ? 3 : 0;
+      state.events.emit(BattleEvent.UNIT_ROUTED, { unit: e, label: Q.labelOf(state, e), side });
+    },
+  };
+}
+// `onFlagshipLost` for shipRules.js's destroy/fire -- shared shape, but
+// needs the destroyed entity itself for the event payload (shipRules
+// only passes the faction), so each call site closes over its own `e`/
+// `tgt`. Iterates this side's own roster (which shipRules.js has no
+// access to) to morale-check every survivor, exactly as the
+// pre-extraction code's flagship-loss loop did.
+function flagshipLostHook(state, destroyedEntity) {
+  return flagSide => {
+    state.G.fleets[flagSide].flagLost = true;
+    state.events.emit(BattleEvent.FLAGSHIP_LOST, { unit: destroyedEntity, side: flagSide });
+    for (const v of Q.aliveOfSide(state, flagSide)) moraleCheck(state, v, false);
+  };
+}
 
 /* ---- morale ---- */
 export function moraleCheck(state, e, fromFR) {
-  if (!Q.isAlive(state, e) || Q.moraleOf(state, e) === ROUTED) return;
-  const pos = Q.posOf(state, e), side = Q.sideOf(state, e);
-  let mod = 0, why = [];
-  if (Q.friendsOf(state, e).some(v => Q.moraleOf(state, v) === STEADY && hexDist(pos, Q.posOf(state, v)) === 1)) { mod++; why.push("+1 support"); }
-  if (Q.inCommand(state, e)) { mod++; why.push("+1 command"); }
-  if (fromFR) { mod--; why.push("−1 flanked"); }
-  if (state.G.fleets[side].supply !== "ok") { mod--; why.push("−1 supply"); }
-  if (state.G.fleets[side].flagLost) { mod--; why.push("−1 flagship"); }
-  const roll = state.random.d6(), tot = roll + mod, pass = tot >= 4;
-  state.events.emit(BattleEvent.MORALE_CHECKED, {
-    unit: e, label: Q.labelOf(state, e), roll, modifier: mod,
-    modifiers: why, total: tot, passed: pass,
+  const r = SR.moraleCheck(state.world, e, state.random, {
+    fromFlankOrRear: fromFR, extraModifier: fleetMoraleModifier(state, Q.sideOf(state, e)), ...moraleHooks(state),
   });
-  if (pass) return true;
-  const morale = state.world.get(e, C.Morale);
-  if (morale.state === STEADY) { morale.state = SHAKEN; }
-  else {
-    morale.state = ROUTED;
-    state.world.get(e, C.Facing).dir = side === 0 ? 3 : 0;
-    state.events.emit(BattleEvent.UNIT_ROUTED, { unit: e, label: Q.labelOf(state, e), side });
-    contagion(state, e);
-  }
-  return false;
+  return r ? r.passed : false; // null: dead or already routed, shipRules did nothing
 }
 export function contagion(state, src) {
-  for (const v of Q.friendsOf(state, src).slice())
-    if (Q.isAlive(state, v) && Q.moraleOf(state, v) !== ROUTED && hexDist(Q.posOf(state, v), Q.posOf(state, src)) <= 2)
-      moraleCheck(state, v, false);
+  SR.contagion(state.world, src, state.random, {
+    extraModifier: fleetMoraleModifier(state, Q.sideOf(state, src)), ...moraleHooks(state),
+  });
 }
 export function destroy(state, e) {
-  state.world.remove(e, C.Alive);
-  const wasFlag = Q.isFlagship(state, e), side = Q.sideOf(state, e);
-  state.events.emit(BattleEvent.UNIT_DESTROYED, {
-    unit: e, label: Q.labelOf(state, e), side, wasFlagship: wasFlag,
+  const side = Q.sideOf(state, e);
+  SR.destroy(state.world, e, state.random, {
+    onDestroyed: (v, wasFlag) => state.events.emit(BattleEvent.UNIT_DESTROYED,
+      { unit: v, label: Q.labelOf(state, v), side: Q.sideOf(state, v), wasFlagship: wasFlag }),
+    moraleCheckOpts: { extraModifier: fleetMoraleModifier(state, side), ...moraleHooks(state) },
+    onFlagshipLost: flagshipLostHook(state, e),
   });
-  contagion(state, e);
-  if (wasFlag) {
-    state.G.fleets[side].flagLost = true;
-    state.events.emit(BattleEvent.FLAGSHIP_LOST, { unit: e, side });
-    for (const v of Q.aliveOfSide(state, side)) moraleCheck(state, v, false);
-  }
 }
 
 /* ---- firing ---- */
 export function fire(state, e, tgt) {
-  const strength = Q.strengthOf(state, e);
-  const dice = Q.moraleOf(state, e) === STEADY ? strength : Math.ceil(strength / 2);
-  const arc = incomingArc(Q.posOf(state, tgt), Q.facingOf(state, tgt), Q.posOf(state, e));
-  let need = { front: 5, flank: 4, rear: 3 }[arc];
-  if (state.G.fleets[Q.sideOf(state, e)].supply === "critical") need++;
-  let hits = 0; const rolls = [];
-  for (let i = 0; i < dice; i++) { const r = state.random.d6(); rolls.push(r); if (r >= need) hits++; }
-  state.events.emit(BattleEvent.SHOT_RESOLVED, {
-    attacker: e, attackerLabel: Q.labelOf(state, e),
-    target: tgt, targetLabel: Q.labelOf(state, tgt),
-    arc, targetNumber: need, rolls, hits,
-    from: Q.posOf(state, e), to: Q.posOf(state, tgt),
-    side: Q.sideOf(state, e),
+  const side = Q.sideOf(state, e), tgtSide = Q.sideOf(state, tgt);
+  const result = SR.fire(state.world, e, tgt, state.random, {
+    needBonus: state.G.fleets[side].supply === "critical" ? 1 : 0,
+    onResolved: r => state.events.emit(BattleEvent.SHOT_RESOLVED, {
+      attacker: e, attackerLabel: Q.labelOf(state, e), target: tgt, targetLabel: Q.labelOf(state, tgt),
+      arc: r.arc, targetNumber: r.need, rolls: r.rolls, hits: r.hits, from: r.from, to: r.to, side,
+    }),
+    onHit: () => state.world.add(tgt, C.HitSinceAct, true),
+    onDestroyed: (v, wasFlag) => state.events.emit(BattleEvent.UNIT_DESTROYED,
+      { unit: v, label: Q.labelOf(state, v), side: Q.sideOf(state, v), wasFlagship: wasFlag }),
+    moraleCheckOpts: { extraModifier: fleetMoraleModifier(state, tgtSide), ...moraleHooks(state) },
+    onFlagshipLost: flagshipLostHook(state, tgt),
   });
-  if (!hits) return { rolls, hits, arc, targetNumber: need };
-  const tgtStrength = state.world.get(tgt, C.Strength);
-  tgtStrength.value = Math.max(0, tgtStrength.value - hits);
-  state.world.add(tgt, C.HitSinceAct, true);
-  if (tgtStrength.value === 0) destroy(state, tgt);
-  else moraleCheck(state, tgt, arc !== "front");
-  return { rolls, hits, arc, targetNumber: need };
+  return { rolls: result.rolls, hits: result.hits, arc: result.arc, targetNumber: result.need };
 }
 
 /* ---- movement ---- */
@@ -89,8 +122,7 @@ export function turnToward(state, e, d) {
 
 export function rotateActivatedUnit(state, direction) {
   if (!Q.canMove(state)) return false;
-  const facing = state.world.get(state.act.u, C.Facing);
-  facing.dir = (facing.dir + direction + 6) % 6;
+  SR.turn(state.world, state.act.u, direction);
   state.act.mp--;
   state.act.moved = true;
   state.act.fireMode = false;
@@ -100,19 +132,17 @@ export function rotateActivatedUnit(state, direction) {
 function tryMoveActivatedUnit(state, direction, spendAllMp) {
   if (spendAllMp ? !Q.canBack(state) : !Q.canMove(state)) return false;
   const entity = state.act.u;
-  const position = Q.posOf(state, entity);
-  const next = neighbor(position, direction);
-  if (!inBounds(next[0], next[1]) || Q.occupiedSet(state).has(key(next[0], next[1]))) return false;
-  if (Q.moraleOf(state, entity) === SHAKEN) {
-    const nearest = Q.nearestEnemy(state, entity);
-    if (nearest && hexDist(next, Q.posOf(state, nearest)) < hexDist(position, Q.posOf(state, nearest))) {
+  const res = SR.stepInto(state.world, entity, direction, {
+    isBlocked: next => !inBounds(next[0], next[1]) || Q.occupiedSet(state).has(key(next[0], next[1])),
+  });
+  if (!res.ok) {
+    if (res.reason === "shaken") {
       state.events.emit(BattleEvent.MOVE_REJECTED, {
         unit: entity, label: Q.labelOf(state, entity), reason: "shaken_advance",
       });
-      return false;
     }
+    return false;
   }
-  setPos(state, entity, next);
   state.act.mp = spendAllMp ? 0 : state.act.mp - 1;
   state.act.moved = true;
   state.act.fireMode = false;

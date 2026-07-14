@@ -10,7 +10,7 @@ import { aiActivate, fire, moveActivatedUnitForward } from "../battle/systems.js
 import { MoraleState, MP_MAX } from "../battle/config.js";
 import * as C from "../battle/components.js";
 import * as Q from "../battle/queries.js";
-import * as ShipCombat from "../map/shipCombat.js";
+import * as ShipRules from "../battle/core/shipRules.js";
 
 function battleWith(random) {
   const state = new BattleSession({ random });
@@ -109,16 +109,16 @@ test("AI systems can finish a deterministic battle without a browser presenter",
 });
 
 test("strategic-map combat returns presentation data without owning effects", () => {
-  const world = new ShipCombat.World();
-  const attacker = ShipCombat.spawnShip(world, {
+  const world = new ShipRules.World();
+  const attacker = ShipRules.spawnShip(world, {
     faction: 0, c: 10, r: 13, dir: 0, isFlag: false, label: "A1",
   });
-  const target = ShipCombat.spawnShip(world, {
+  const target = ShipRules.spawnShip(world, {
     faction: 1, c: 11, r: 13, dir: 3, isFlag: false, label: "T1",
   });
   const random = new SequenceRandomSource([6, 1, 1, 1, 6]);
 
-  const result = ShipCombat.fire(world, attacker, target, random);
+  const result = ShipRules.fire(world, attacker, target, random);
 
   assert.equal(result.hits, 1);
   assert.deepEqual(result.from, [10, 13]);

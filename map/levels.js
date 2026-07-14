@@ -270,7 +270,7 @@ function moonsOf(bodyId) {
 // ---------------------------------------------------------------------
 // Fleets: each faction's real starting position in the Sol system (Sun-
 // centered xKm,yKm) and starting formation -- used exactly once, to spawn
-// each faction's 12 ships into map/shipCombat.js's persistent World (see
+// each faction's 12 ships into battle/core/shipRules.js's persistent World (see
 // map/main.js:spawnInitialShips). From that point on a ship's real
 // Position/Facing components are the only source of truth for where it
 // is; these two exports are never read again afterward.
