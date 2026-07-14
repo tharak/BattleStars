@@ -189,10 +189,10 @@ function moveResultHint(res) {
 // Neither the asteroid field nor a gravity well blocks movement outright
 // (see shipCombat.js's stepInto -- only ship occupancy did, and that's
 // gone too); they just cost more of a ship's MP budget to push through
-// -- asteroids always the full budget, a gravity well 1/2/3 depending on
-// how deep into it the hex sits (see gravityHexCost) -- so entering one
-// requires that much MP banked up front, checked here before the move is
-// even attempted (shipCombat.js has no concept of MP at all, that
+// -- asteroids always the full budget, a gravity well an uncapped amount
+// that grows the closer/deeper in a hex sits (see gravityHexCost) -- so
+// entering one requires that much MP banked up front, checked here before
+// the move is even attempted (shipCombat.js has no concept of MP at all, that
 // bookkeeping is entirely this file's own). Where both apply to the same
 // hex, whichever demands more wins (Math.max), not their sum.
 function hexMoveCost(hex) {
@@ -661,13 +661,20 @@ function gravityWells(layout) {
 // entirely -- gravityWells already excludes moons, but a very small/
 // close-in planet could still round to nothing.
 const GRAVITY_INFLUENCE_RADIUS_FACTOR = 4;
-// Flat cost tiers by how far into a well's reach a hex sits, not a
-// smooth gradient -- inner third: 3 MP, middle third: 2, outer third: 1
-// (the same as open space, so that outer band exists purely to extend
-// the painted color, not to add real cost) -- the same "closer/heavier =
-// harder to cross" idea the asteroid field's own MP cost already uses.
-function gravityHexCost(distFrac) {
-  return distFrac < 1 / 3 ? 3 : distFrac < 2 / 3 ? 2 : 1;
+// Cost is a real, unbounded falloff, not a flat 3-tier scale -- inversely
+// proportional to distance in units of the body's own radius, scaled so
+// it lands on exactly 1 MP (the same as open space) right at the edge of
+// GRAVITY_INFLUENCE_RADIUS_FACTOR: a hex FACTOR radii out costs
+// FACTOR/FACTOR = 1; one body-radius out (a planet's own "surface")
+// costs FACTOR; deep inside costs more still, with no ceiling -- next to
+// something as massive as the Sun this can run well past the old fixed
+// cap of 3, which is the point (the pull really is that dominant that
+// close in, not an arbitrary game-balance number). distRadii is floored
+// well short of 0 to avoid a divide-by-near-zero singularity exactly at
+// a well's own center.
+function gravityHexCost(distPx, well) {
+  const distRadii = Math.max(distPx / well.rPx, 0.25);
+  return Math.max(1, Math.ceil(GRAVITY_INFLUENCE_RADIUS_FACTOR / distRadii));
 }
 // Every hex within reach of the Sun or a planet's gravity, painted that
 // body's own color. Where two wells' reach overlaps, a hex takes
@@ -689,7 +696,7 @@ function gravityHexes(layout) {
         const [x, y] = shipHexOffset(c, r);
         const dist = Math.hypot(x - well.x, y - well.z);
         if (dist > radius) continue;
-        const cost = gravityHexCost(dist / radius);
+        const cost = gravityHexCost(dist, well);
         const k = hexKey(c, r);
         const existing = cells.get(k);
         if (!existing || cost > existing.cost) cells.set(k, { cost, colorHex: well.colorHex, x, y });
