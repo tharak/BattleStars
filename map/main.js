@@ -608,16 +608,21 @@ function ensureShipsSpawned(layout) {
 function shipsSnapshot() {
   // Mirrors battle/render.js's own `tgts = Q.canFire(state) ? Q.legalTargets(...) : []`
   // -- only highlight targets while the selected ship could actually still
-  // fire this activation (not, say, after it's already fired).
+  // fire this activation (not, say, after it's already fired). The
+  // outline uses the *attacker's* own faction color, not a fixed accent
+  // -- a fixed red would nearly vanish against a Red-faction target's
+  // own red fill/stroke, and the attacker's color reads as "who can hit
+  // this" at a glance.
   const targets = activation && SC.canFire(world, activation, beltObstacles)
     ? new Set(SC.legalTargets(world, activation.u, beltObstacles)) : null;
+  const targetColor = targets ? colorsFor({ faction: SC.factionOf(world, activation.u) }).fill : null;
   return SC.aliveShips(world).map(e => {
     const [c, r] = SC.posOf(world, e);
     const [x, y] = shipHexOffset(c, r);
     return {
       id: e, kind: "ship", faction: SC.factionOf(world, e), isFlag: SC.isFlagship(world, e),
       label: SC.labelOf(world, e), facingDeg: DIR_ANGLE[SC.facingOf(world, e)],
-      isTarget: !!targets?.has(e),
+      isTarget: !!targets?.has(e), targetColor,
       x, y,
     };
   });
@@ -911,7 +916,8 @@ function renderSystem3D(entry, data) {
     for (const s of ships) {
       addShip({
         x: s.x, z: s.y, colorHex: colorsFor(s).fill, data: s,
-        selected: s.id === selectedShip, facingDeg: s.facingDeg, isFlag: s.isFlag, isTarget: s.isTarget,
+        selected: s.id === selectedShip, facingDeg: s.facingDeg, isFlag: s.isFlag,
+        isTarget: s.isTarget, targetColor: s.targetColor,
       });
     }
     // A shot's tracer, fading over time -- see ensureEffectLoop, which owns
@@ -1132,14 +1138,15 @@ function renderSystem2D(entry, data) {
       ctx.fillText("★", sx, sy + 3);
     }
     // A legal fire target for the currently-selected ship (see
-    // shipsSnapshot) -- same red outline convention as
-    // battle/render.js's own ACCENT.targetOutline.
+    // shipsSnapshot) -- outlined in the *attacker's* own color (not
+    // battle/render.js's fixed ACCENT.targetOutline red), so it reads as
+    // "who can hit this" and doesn't vanish against a same-colored hull.
     if (ship.isTarget) {
       ctx.beginPath();
       corners.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
       ctx.closePath();
       ctx.lineWidth = LINE_WIDTH.targetOutline;
-      ctx.strokeStyle = ACCENT.targetOutline;
+      ctx.strokeStyle = ship.targetColor;
       ctx.stroke();
     }
     return tapRadius;

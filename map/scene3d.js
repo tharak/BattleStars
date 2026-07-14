@@ -200,7 +200,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   // applied via a quaternion rather than an Euler angle so there's no
   // manual sign-guessing about which way "positive rotation" goes in this
   // scene's particular axis convention.
-  function addShip({ x, z, colorHex, data, selected, facingDeg, isFlag, isTarget }) {
+  function addShip({ x, z, colorHex, data, selected, facingDeg, isFlag, isTarget, targetColor }) {
     // Grounded at the plane, not lifted -- unlike the old ring-only
     // marker, this group now holds both the flat hex token (which
     // should visibly rest on the grid, at SHIP_BASE_Y) and the raised
@@ -228,12 +228,13 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
     group.add(ship);
     // Selection outline takes priority over the target outline (a ship
     // can't be both at once anyway -- selected is the acting ship,
-    // isTarget is some *other* ship it could fire at); target uses
-    // ACCENT.targetOutline, matching battle/render.js's own red
-    // legal-target ring.
+    // isTarget is some *other* ship it could fire at); target uses the
+    // *attacker's* own color (targetColor, from map/main.js's
+    // shipsSnapshot), not a fixed accent -- reads as "who can hit this"
+    // and won't vanish against a same-colored hull.
     if (selected || isTarget) {
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
-        new THREE.LineBasicMaterial({ color: selected ? 0xffffff : ACCENT.targetOutline }));
+        new THREE.LineBasicMaterial({ color: selected ? 0xffffff : targetColor }));
       edges.position.y = SHIP_HEIGHT_ABOVE_PLANE;
       edges.quaternion.copy(ship.quaternion);
       group.add(edges);
@@ -287,7 +288,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       const edgeGeo = new LineSegmentsGeometry();
       edgeGeo.setPositions(flat);
       const edgeMat = new LineMaterial({
-        color: selected ? 0xffffff : (isTarget ? ACCENT.targetOutline : colorHex), linewidth: w,
+        color: selected ? 0xffffff : (isTarget ? targetColor : colorHex), linewidth: w,
         resolution: new THREE.Vector2(sizePx, sizePx), transparent: true, opacity: selected || isTarget ? 1 : 0.9,
       });
       group.add(new LineSegments2(edgeGeo, edgeMat));
