@@ -661,6 +661,10 @@ function gravityWells(layout) {
 // entirely -- gravityWells already excludes moons, but a very small/
 // close-in planet could still round to nothing.
 const GRAVITY_INFLUENCE_RADIUS_FACTOR = 4;
+// The 2D fallback's own opacity ceiling (see the gravity-hex drawing loop
+// in renderSystem2D) -- scaled down per hex by gravityHexIntensity, so
+// only the deepest hexes ever actually reach this value.
+const GRAVITY_HEX_MAX_OPACITY = 0.3;
 // Cost is a real, unbounded falloff, not a flat 3-tier scale -- inversely
 // proportional to distance in units of the body's own radius, scaled so
 // it lands on exactly 1 MP (the same as open space) right at the edge of
@@ -675,6 +679,20 @@ const GRAVITY_INFLUENCE_RADIUS_FACTOR = 4;
 function gravityHexCost(distPx, well) {
   const distRadii = Math.max(distPx / well.rPx, 0.25);
   return Math.max(1, Math.ceil(GRAVITY_INFLUENCE_RADIUS_FACTOR / distRadii));
+}
+// A 0..1 read of the same cost value, for painting: the cheapest hexes
+// (cost 1, the outer edge of a well's reach) paint at
+// GRAVITY_HEX_MIN_INTENSITY, climbing toward full intensity as cost
+// grows -- so the color itself visibly deepens/brightens the closer (and
+// more expensive) a hex is, the same falloff the MP cost already uses,
+// just read as a gradient instead of a number. Cost is unbounded
+// (gravityHexCost has no ceiling right next to a massive body), so this
+// clamps at 1 rather than trying to normalize against some cost that
+// might not exist.
+const GRAVITY_HEX_MIN_INTENSITY = 0.25;
+const GRAVITY_HEX_INTENSITY_PER_COST = 0.05;
+function gravityHexIntensity(cost) {
+  return Math.min(1, GRAVITY_HEX_MIN_INTENSITY + cost * GRAVITY_HEX_INTENSITY_PER_COST);
 }
 // Every hex within reach of the Sun or a planet's gravity, painted that
 // body's own color. Where two wells' reach overlaps, a hex takes
@@ -713,16 +731,24 @@ function updateGravityHexes(cells) {
 }
 // Groups gravity hexes by color into one flat triangle-fan array per
 // color (3 consecutive [x,y] pairs per triangle -- center, corner k,
-// corner k+1) -- feeds scene3d.js's addGravityField, which draws one
+// corner k+1), plus a parallel per-vertex intensity array (all 3 of one
+// triangle's vertices share their hex's own intensity, so the gradient
+// steps hex-by-hex rather than blending smoothly across a hex's own
+// area -- consistent with everything else here being hex-discrete, not
+// continuous) -- feeds scene3d.js's addGravityField, which draws one
 // merged mesh per color instead of one per hex (a big body's field can
 // cover a thousand-plus cells).
 function gravityFieldGroups(cells) {
-  const groups = new Map(); // colorHex -> triangles[]
-  for (const { colorHex, x, y } of cells.values()) {
+  const groups = new Map(); // colorHex -> {triangles:[], intensities:[]}
+  for (const { colorHex, x, y, cost } of cells.values()) {
     const corners = hexCorners(x, y, GRID_HEX_SIZE_PX);
-    const triangles = groups.get(colorHex) || [];
-    for (let k = 0; k < 6; k++) triangles.push([x, y], corners[k], corners[(k + 1) % 6]);
-    groups.set(colorHex, triangles);
+    let group = groups.get(colorHex);
+    if (!group) { group = { triangles: [], intensities: [] }; groups.set(colorHex, group); }
+    const intensity = gravityHexIntensity(cost);
+    for (let k = 0; k < 6; k++) {
+      group.triangles.push([x, y], corners[k], corners[(k + 1) % 6]);
+      group.intensities.push(intensity, intensity, intensity);
+    }
   }
   return groups;
 }
@@ -832,8 +858,8 @@ function renderSystem3D(entry, data) {
     addSpacetimeGrid({ segments: warpedGridLines(gravityWells(layout)) });
     const gravityCells = gravityHexes(layout);
     updateGravityHexes(gravityCells);
-    for (const [colorHex, triangles] of gravityFieldGroups(gravityCells)) {
-      addGravityField({ triangles, colorHex });
+    for (const [colorHex, group] of gravityFieldGroups(gravityCells)) {
+      addGravityField({ triangles: group.triangles, intensities: group.intensities, colorHex });
     }
     if (layout.center) {
       addBody({ x: 0, z: 0, radius: layout.center.rPx, color: colorsFor(layout.center).fill, data: layout.center, emissive: true, textureUrl: textureFor(layout.center) });
@@ -987,18 +1013,20 @@ function renderSystem2D(entry, data) {
   }
   ctx.globalAlpha = 1;
 
-  // Every hex under a body's gravity, tinted that body's own color -- see
-  // gravityHexes above. Drawn right after the grid and before any real
-  // body/ship, so everything else still reads clearly on top of it.
+  // Every hex under a body's gravity, tinted that body's own color and
+  // faded by how strong the pull is there (gravityHexIntensity) -- the
+  // closer/costlier a hex, the more solid its color reads. Drawn right
+  // after the grid and before any real body/ship, so everything else
+  // still reads clearly on top of it.
   const gravityCells = gravityHexes(layout);
   updateGravityHexes(gravityCells);
-  for (const { colorHex, x, y } of gravityCells.values()) {
+  for (const { colorHex, x, y, cost } of gravityCells.values()) {
     const [sx, sy] = worldToScreen(camera2d, x, y);
     const corners = hexCorners(sx, sy, GRID_HEX_SIZE_PX * camera2d.zoom);
     ctx.beginPath();
     corners.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
     ctx.closePath();
-    ctx.fillStyle = hexToRgba(colorHex, 0.3);
+    ctx.fillStyle = hexToRgba(colorHex, GRAVITY_HEX_MAX_OPACITY * gravityHexIntensity(cost));
     ctx.fill();
   }
 

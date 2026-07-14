@@ -368,13 +368,29 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   // [x,z] pairs, 3 consecutive pairs per triangle -- map/main.js builds
   // it (via battle/hexmath.js's hexCorners, the same hex shape ship
   // tokens use) since this module doesn't know the hex grid's own size.
-  function addGravityField({ triangles, colorHex }) {
+  //
+  // `intensities` is a parallel 0..1-per-vertex array (map/main.js's
+  // gravityHexIntensity) baked into each vertex's own color brightness
+  // rather than true per-vertex alpha -- WebGL vertex-color alpha needs a
+  // 4-component attribute and shader wiring this scene doesn't otherwise
+  // use anywhere, while scaling RGB by intensity against this scene's
+  // near-black background reads the same way a real alpha gradient would
+  // (dimmer near the edge of a well's reach, full color deep inside it),
+  // with one flat uniform opacity on the material underneath.
+  function addGravityField({ triangles, intensities, colorHex }) {
     const positions = [];
-    for (let i = 0; i < triangles.length; i++) positions.push(triangles[i][0], GRAVITY_HEX_Y, triangles[i][1]);
+    const colors = [];
+    const base = new THREE.Color(colorHex);
+    for (let i = 0; i < triangles.length; i++) {
+      positions.push(triangles[i][0], GRAVITY_HEX_Y, triangles[i][1]);
+      const t = intensities[i];
+      colors.push(base.r * t, base.g * t, base.b * t);
+    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     const mat = new THREE.MeshBasicMaterial({
-      color: colorHex, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false,
+      vertexColors: true, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false,
     });
     objectGroup.add(new THREE.Mesh(geo, mat));
   }
