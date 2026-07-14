@@ -199,12 +199,15 @@ const MOVE_BASE_COST = 1;
 // asteroid hex demands the rest of a full tank, a gravity well an
 // uncapped extra that grows the closer/deeper in a hex sits (see
 // gravityHexCost). Expressed as *extra* MP on top of MOVE_BASE_COST,
-// not an absolute replacement, so the same terrain always costs the
-// same regardless of which direction (forward/backward) a ship enters
-// it from, and so a future ship with its own non-1 base move cost still
-// gets the right total (base + extra) without this function changing.
-// Where both obstacles apply to the same hex, whichever demands more
-// extra wins (Math.max), not their sum.
+// not an absolute replacement, so a future ship with its own non-1 base
+// move cost still gets the right total (base + extra) without this
+// function changing. Where both obstacles apply to the same hex,
+// whichever demands more extra wins (Math.max), not their sum. Only
+// doForward reads this -- doBackward mirrors battle/queries.js's own
+// canBack ("backward = the whole move"): a real battle rule that
+// backward always costs a ship's entire MP tank, terrain or not, kept
+// as-is rather than metered like forward to match the same ship
+// config the tactical battle screen uses.
 function hexExtraCost(hex) {
   const k = hexKey(hex[0], hex[1]);
   const asteroidExtra = beltObstacles.has(k) ? MP_MAX - MOVE_BASE_COST : 0;
@@ -227,11 +230,9 @@ function doForward() {
 }
 function doBackward() {
   if (!SC.canBack(activation)) return;
-  const cost = hexMoveCost(SC.backwardHex(world, activation.u));
-  if (activation.mp < cost) { setHint(`Not enough MP -- that hex costs ${cost}.`); renderInfoPanel(); return; }
   const res = SC.moveBackward(world, activation.u);
   if (!res.ok) { moveResultHint(res); renderInfoPanel(); return; }
-  activation.mp -= cost; activation.moved = true; activation.fireMode = false;
+  activation.mp = 0; activation.moved = true; activation.fireMode = false;
   setHint("");
   renderInfoPanel();
   render();
