@@ -200,7 +200,7 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   // applied via a quaternion rather than an Euler angle so there's no
   // manual sign-guessing about which way "positive rotation" goes in this
   // scene's particular axis convention.
-  function addShip({ x, z, colorHex, data, selected, facingDeg, isFlag }) {
+  function addShip({ x, z, colorHex, data, selected, facingDeg, isFlag, isTarget }) {
     // Grounded at the plane, not lifted -- unlike the old ring-only
     // marker, this group now holds both the flat hex token (which
     // should visibly rest on the grid, at SHIP_BASE_Y) and the raised
@@ -226,8 +226,14 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       new THREE.Vector3(Math.cos(rad), 0, Math.sin(rad)),
     );
     group.add(ship);
-    if (selected) {
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffffff }));
+    // Selection outline takes priority over the target outline (a ship
+    // can't be both at once anyway -- selected is the acting ship,
+    // isTarget is some *other* ship it could fire at); target uses
+    // ACCENT.targetOutline, matching battle/render.js's own red
+    // legal-target ring.
+    if (selected || isTarget) {
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color: selected ? 0xffffff : ACCENT.targetOutline }));
       edges.position.y = SHIP_HEIGHT_ABOVE_PLANE;
       edges.quaternion.copy(ship.quaternion);
       group.add(edges);
@@ -281,8 +287,8 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
       const edgeGeo = new LineSegmentsGeometry();
       edgeGeo.setPositions(flat);
       const edgeMat = new LineMaterial({
-        color: selected ? 0xffffff : colorHex, linewidth: w,
-        resolution: new THREE.Vector2(sizePx, sizePx), transparent: true, opacity: selected ? 1 : 0.9,
+        color: selected ? 0xffffff : (isTarget ? ACCENT.targetOutline : colorHex), linewidth: w,
+        resolution: new THREE.Vector2(sizePx, sizePx), transparent: true, opacity: selected || isTarget ? 1 : 0.9,
       });
       group.add(new LineSegments2(edgeGeo, edgeMat));
     }
@@ -325,14 +331,31 @@ export function createSystemScene({ canvas, sizePx, minZoom, maxZoom }) {
   // fresh every rebuild() the same as everything else here -- since
   // clearObjects() wipes the whole scene at the start of every render (see
   // rebuild below), a tracer simply not being re-added on the next render
-  // IS it disappearing after one frame, no separate cleanup/timer needed.
-  function addTracer({ from, to, hit }) {
+  // IS it disappearing, no separate cleanup/timer needed here. `alpha`
+  // (0..1, computed by the caller from the effect's own start/dur) drives
+  // the actual fade -- map/main.js's ensureEffectLoop is what keeps calling
+  // rebuild() with a shrinking alpha across subsequent frames until the
+  // effect expires, same as battle/render.js's own laser fade.
+  function addTracer({ from, to, hit, alpha = 1 }) {
     const geo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(from[0], SHIP_BASE_Y + 0.1, from[1]),
       new THREE.Vector3(to[0], SHIP_BASE_Y + 0.1, to[1]),
     ]);
-    const mat = new THREE.LineBasicMaterial({ color: hit ? 0xff3355 : 0x8899aa, transparent: true, opacity: 0.9 });
+    const mat = new THREE.LineBasicMaterial({ color: hit ? 0xff3355 : 0x8899aa, transparent: true, opacity: 0.9 * alpha });
     objectGroup.add(new THREE.Line(geo, mat));
+    if (hit) {
+      // A wider, dimmer halo line underneath -- same "glow" idea as
+      // battle/render.js's LINE_WIDTH.laserHitHalo double-stroke, done
+      // here via a fatter LineSegments2 since plain THREE.Line has no
+      // per-object line width.
+      const haloGeo = new LineSegmentsGeometry();
+      haloGeo.setPositions([from[0], SHIP_BASE_Y + 0.1, from[1], to[0], SHIP_BASE_Y + 0.1, to[1]]);
+      const haloMat = new LineMaterial({
+        color: 0xff3355, linewidth: 6, resolution: new THREE.Vector2(sizePx, sizePx),
+        transparent: true, opacity: 0.5 * alpha,
+      });
+      objectGroup.add(new LineSegments2(haloGeo, haloMat));
+    }
   }
 
   // The "rubber sheet" spacetime grid: a flat reference grid across the

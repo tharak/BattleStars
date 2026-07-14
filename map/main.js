@@ -12,6 +12,7 @@ import {
 import { DIR_ANGLE, hexCorners, key as hexKey } from "../battle/hexmath.js";
 import { formationLayout } from "../battle/formations.js";
 import { BOARD_TINT, ACCENT } from "../battle/colors.js";
+import { LINE_WIDTH, LASER_DURATION, LASER_HALO_ALPHA } from "../battle/dimensions.js";
 import { MP_MAX, STATE_NAME } from "../battle/config.js";
 import * as SC from "../battle/core/shipRules.js";
 
@@ -67,9 +68,11 @@ let selectedShip = null;
 let activation = null;
 let travelArmed = false;
 // Fire's own transient shot-line records, derived here from fire results
-// and read once by the renderer after a fire command, then
-// cleared immediately after, so a tracer shows for exactly one render,
-// not battle's own state.effects (this is the map's own, unrelated array).
+// -- a parallel, map-local array to battle's own state.effects (not
+// shared with it), each with a start timestamp/duration so ensureEffectLoop
+// can fade it out over subsequent frames exactly like battle/render.js's
+// own laser effect, instead of a static line that only ever repaints when
+// something else happens to trigger a render.
 const effects = [];
 // The asteroid field's current hexes (a Set of "c,r" keys, see
 // battle/hexmath.js's key()) -- recomputed every render (updateBeltObstacles)
@@ -251,7 +254,10 @@ function doFireAt(tgt) {
   if (!SC.legalTargets(world, activation.u, beltObstacles).includes(tgt)) return;
   const firer = activation.u;
   const result = SC.fire(world, firer, tgt, random);
-  effects.push({ from: result.from, to: result.to, hit: result.hits > 0 });
+  effects.push({
+    from: result.from, to: result.to, hit: result.hits > 0, start: performance.now(),
+    dur: result.hits > 0 ? LASER_DURATION.hit : LASER_DURATION.miss,
+  });
   activation.fired = true; activation.fireMode = false;
   setHint(`${SC.labelOf(world, firer)} fires (${result.arc} arc, ${result.need}+): [${result.rolls.join(" ")}] → ` +
     `${result.hits} hit${result.hits === 1 ? "" : "s"}${result.destroyed ? " — destroyed!" : ""}`);
@@ -600,12 +606,18 @@ function ensureShipsSpawned(layout) {
 // actually drawn on screen. Called fresh every render (World lookups are
 // cheap; this is no more expensive than the old formula-driven version).
 function shipsSnapshot() {
+  // Mirrors battle/render.js's own `tgts = Q.canFire(state) ? Q.legalTargets(...) : []`
+  // -- only highlight targets while the selected ship could actually still
+  // fire this activation (not, say, after it's already fired).
+  const targets = activation && SC.canFire(world, activation, beltObstacles)
+    ? new Set(SC.legalTargets(world, activation.u, beltObstacles)) : null;
   return SC.aliveShips(world).map(e => {
     const [c, r] = SC.posOf(world, e);
     const [x, y] = shipHexOffset(c, r);
     return {
       id: e, kind: "ship", faction: SC.factionOf(world, e), isFlag: SC.isFlagship(world, e),
       label: SC.labelOf(world, e), facingDeg: DIR_ANGLE[SC.facingOf(world, e)],
+      isTarget: !!targets?.has(e),
       x, y,
     };
   });
@@ -899,15 +911,17 @@ function renderSystem3D(entry, data) {
     for (const s of ships) {
       addShip({
         x: s.x, z: s.y, colorHex: colorsFor(s).fill, data: s,
-        selected: s.id === selectedShip, facingDeg: s.facingDeg, isFlag: s.isFlag,
+        selected: s.id === selectedShip, facingDeg: s.facingDeg, isFlag: s.isFlag, isTarget: s.isTarget,
       });
     }
-    // A shot's tracer -- read once here and cleared right after (see the
-    // `effects` declaration above), so it only ever shows for the one
-    // render a fire command triggers.
-    for (const eff of effects) addTracer({ from: shipHexOffset(...eff.from), to: shipHexOffset(...eff.to), hit: eff.hit });
+    // A shot's tracer, fading over time -- see ensureEffectLoop, which owns
+    // expiring `effects` and repainting while any are still fading.
+    const now = performance.now();
+    for (const eff of effects) {
+      const alpha = 1 - (now - eff.start) / eff.dur;
+      addTracer({ from: shipHexOffset(...eff.from), to: shipHexOffset(...eff.to), hit: eff.hit, alpha });
+    }
   });
-  effects.length = 0;
 
   canvas3d.onclick = ev => {
     if (sceneJustDragged) { sceneJustDragged = false; return; }
@@ -1117,6 +1131,17 @@ function renderSystem2D(entry, data) {
       ctx.textAlign = "center";
       ctx.fillText("★", sx, sy + 3);
     }
+    // A legal fire target for the currently-selected ship (see
+    // shipsSnapshot) -- same red outline convention as
+    // battle/render.js's own ACCENT.targetOutline.
+    if (ship.isTarget) {
+      ctx.beginPath();
+      corners.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      ctx.lineWidth = LINE_WIDTH.targetOutline;
+      ctx.strokeStyle = ACCENT.targetOutline;
+      ctx.stroke();
+    }
     return tapRadius;
   };
   // One small hex per asteroid, matching the "1-hex" token language ships
@@ -1152,18 +1177,31 @@ function renderSystem2D(entry, data) {
     }
   }
   for (const s of ships) s.hitRPx = drawShip(s, s.id === selectedShip);
-  // A shot's tracer -- read once here and cleared right after (see the
-  // `effects` declaration above), so it only ever shows for the one
-  // render a fire command triggers.
-  ctx.lineWidth = 1.5;
+  // A shot's tracer, fading over time -- see ensureEffectLoop, which owns
+  // expiring `effects` and repainting while any are still fading. Same
+  // width/halo/duration parity as battle/render.js's own laser effect
+  // (LINE_WIDTH/LASER_HALO_ALPHA), keeping the hit/miss color scheme this
+  // file already used rather than battle's per-faction color, since a
+  // tracer here has no single "side" to key off of the way battle's
+  // fixed 2-side board does.
+  const effNow = performance.now();
   for (const eff of effects) {
     const [fx, fy] = worldToScreen(camera2d, ...shipHexOffset(...eff.from));
     const [tx, ty] = worldToScreen(camera2d, ...shipHexOffset(...eff.to));
+    const alpha = Math.max(0, 1 - (effNow - eff.start) / eff.dur);
+    ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.strokeStyle = eff.hit ? "#ff3355" : "#8899aa";
+    ctx.lineWidth = eff.hit ? LINE_WIDTH.laserHit : LINE_WIDTH.laserMiss;
     ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
+    if (eff.hit) {
+      ctx.globalAlpha = alpha * LASER_HALO_ALPHA;
+      ctx.lineWidth = LINE_WIDTH.laserHitHalo;
+      ctx.stroke();
+    }
+    ctx.restore();
   }
   ctx.restore();
-  effects.length = 0;
 
   canvas.onmousedown = ev => {
     if (ev.button !== 2) return;
@@ -1287,6 +1325,26 @@ function render() {
   infoPanel.style.display = entry.level === "system" ? "block" : "none";
   if (entry.level === "system") renderSystem(entry, data);
   else renderUniverse(entry, data);
+  ensureEffectLoop();
+}
+// Mirrors battle/render.js's own draw()/ensureEffectLoop split: render()
+// paints one frame (reading whatever's left in `effects`, each already
+// carrying its own alpha-implying start/dur), and whenever a laser is
+// still fading this also keeps a requestAnimationFrame loop alive to
+// repaint on subsequent frames, stopping itself once every effect has
+// expired -- callers everywhere else just call render() once per action,
+// same as always, and get the fade animation for free.
+let effectLoopRunning = false;
+function ensureEffectLoop() {
+  if (effectLoopRunning || !effects.length) return;
+  effectLoopRunning = true;
+  const tick = () => {
+    const now = performance.now();
+    for (let i = effects.length - 1; i >= 0; i--) if (now - effects[i].start >= effects[i].dur) effects.splice(i, 1);
+    if (effects.length) { render(); requestAnimationFrame(tick); }
+    else effectLoopRunning = false;
+  };
+  requestAnimationFrame(tick);
 }
 
 function zoomIn(enter, label) {
