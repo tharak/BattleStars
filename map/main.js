@@ -214,9 +214,11 @@ function doForward() {
 }
 function doBackward() {
   if (!SC.canBack(activation)) return;
+  const cost = hexMoveCost(SC.backwardHex(world, activation.u));
+  if (activation.mp < cost) { setHint(`Not enough MP -- that hex costs ${cost}.`); renderInfoPanel(); return; }
   const res = SC.moveBackward(world, activation.u);
   if (!res.ok) { moveResultHint(res); renderInfoPanel(); return; }
-  activation.mp = 0; activation.moved = true; activation.fireMode = false;
+  activation.mp -= cost; activation.moved = true; activation.fireMode = false;
   setHint("");
   renderInfoPanel();
   render();
